@@ -82,7 +82,7 @@ def tokenize_and_stem(text):
 
 tf = TfidfVectorizer(analyzer='word', min_df=0, max_df=0.9, tokenizer=tokenize_and_stem, stop_words='english')
 tfidf_matrix = tf.fit_transform(df['title'])
-
+# 27315 terms(words)
 
 # seq = range(200, 601, 50)
 # var_track = []
@@ -97,7 +97,7 @@ def title_process(df):
     tf = TfidfVectorizer(analyzer='word', min_df=0, max_df=0.9, tokenizer=tokenize_and_stem, stop_words='english')
     tfidf_matrix = tf.fit_transform(df['title'])
     # Latent semantic analysis and re-normalization for tfidf matrix (dimension reduction)
-    svd = TruncatedSVD(n_components=200, algorithm='randomized', n_iter=5, random_state=None, tol=0.0)
+    svd = TruncatedSVD(n_components=350, algorithm='randomized', n_iter=5, random_state=None, tol=0.0)
     normalizer = Normalizer(copy=False)
     lsa = make_pipeline(svd, normalizer)
     tfidf_rd = lsa.fit_transform(tfidf_matrix)
@@ -193,59 +193,60 @@ def title_only(a, b):
 
 
 # generate top-k recommendation list given an index
-def query(ind, k=30, dist=mixed_dist, data=mat):
-    idx = data[ind, fts['id']]
-    # indices = np.arange(len(data))
-    # temp_data = data[indices!=ind, :]
-    # temp_data = np.delete(data, ind, 0)
-    # dist_mat = np.apply_along_axis(dist, axis=1, arr=temp_data, b=data[ind, :])
-    dist_mat = np.apply_along_axis(dist, axis=1, arr=data, b=data[ind, :])
-    temp_ind = np.argpartition(dist_mat, k+1)[:k+1]
-    top_ind = temp_ind[np.argsort(dist_mat[temp_ind])]
-    if ind in top_ind:
-        top_ind = top_ind[top_ind != ind]
-    else:
-        top_ind = top_ind[:k]
-    top_score = dist_mat[top_ind]
-    # top_idy = temp_data[top_ind, fts['id']]
-    top_idy = data[top_ind, fts['id']]
-    result = []
-    for idy, value in zip(top_idy, top_score):
-        pair = dict()
-        pair['idX'] = idx
-        pair['idY'] = idy
-        pair['method'] = 'content_based_v1'
-        pair['score'] = value
-        result.append(pair)
-    return result
+# def query(ind, k=30, dist=mixed_dist, data=mat):
+#     idx = data[ind, fts['id']]
+#     # indices = np.arange(len(data))
+#     # temp_data = data[indices!=ind, :]
+#     # temp_data = np.delete(data, ind, 0)
+#     # dist_mat = np.apply_along_axis(dist, axis=1, arr=temp_data, b=data[ind, :])
+#     dist_mat = np.apply_along_axis(dist, axis=1, arr=data, b=data[ind, :])
+#     temp_ind = np.argpartition(dist_mat, k+1)[:k+1]
+#     top_ind = temp_ind[np.argsort(dist_mat[temp_ind])]
+#     if ind in top_ind:
+#         top_ind = top_ind[top_ind != ind]
+#     else:
+#         top_ind = top_ind[:k]
+#     top_score = dist_mat[top_ind]
+#     # top_idy = temp_data[top_ind, fts['id']]
+#     top_idy = data[top_ind, fts['id']]
+#     result = []
+#     for idy, value in zip(top_idy, top_score):
+#         pair = dict()
+#         pair['idX'] = idx
+#         pair['idY'] = idy
+#         pair['method'] = 'content_based_v1'
+#         pair['score'] = value
+#         result.append(pair)
+#     return result
 
 
 # generate top-k recommendation list given an index
 def query(ind, k=30, dist=mixed_dist, data=mat):
+    # get id and category_id for given index
     idx = data[ind, fts['id']]
     cate_id = data[ind, fts['category_id']]
-    temp_data = data[data[:, fts['category_id']]==cate_id]
-    # indices = np.arange(len(data))
-    # temp_data = data[indices!=ind, :]
-    # temp_data = np.delete(data, ind, 0)
+    # get candidate data and calculate distance
+    indices = np.arange(len(data))
+    temp_data = data[(data[:, fts['category_id']]==cate_id) & (indices!=ind)]
+    if len(temp_data) == 0:
+        return [{'idX': idx, 'idY': idx, 'score':1, 'method':'content_based_v1'}]
     dist_mat = np.apply_along_axis(dist, axis=1, arr=temp_data, b=data[ind, :])
-    # dist_mat = np.apply_along_axis(dist, axis=1, arr=data, b=data[ind, :])
-    temp_ind = np.argpartition(dist_mat, k+1)[:k+1]
-    top_ind = temp_ind[np.argsort(dist_mat[temp_ind])]
-    if ind in top_ind:
-        top_ind = top_ind[top_ind != ind]
+
+    if len(temp_data) > k:
+        temp_ind = np.argpartition(dist_mat, k)[:k]
+        top_ind = temp_ind[np.argsort(dist_mat[temp_ind])]
     else:
-        top_ind = top_ind[:k]
+        top_ind = np.argsort(dist_mat)
+
     top_score = dist_mat[top_ind]
     top_idy = temp_data[top_ind, fts['id']]
-    # top_idy = data[top_ind, fts['id']]
     result = []
     for idy, value in zip(top_idy, top_score):
         pair = dict()
         pair['idX'] = idx
         pair['idY'] = idy
         pair['method'] = 'content_based_v1'
-        pair['score'] = value
+        pair['score'] = 1 - value
         result.append(pair)
     return result
 
@@ -257,21 +258,17 @@ def query(ind, k=30, dist=mixed_dist, data=mat):
 #     return pairs
 
 
-# random sample indices
-sample = randint(0, len(data), 1000)
-
-
 # parallel computing
-def parallel(func, chunk=sample, p=6):
+def parallel(func, chunk, p=6):
     pool = Pool(processes=p)
-    result = pool.map(func, chunk)
+    result = pool.map_async(func, chunk).get()
     flat_result = [sku for rs_list in result for sku in rs_list]
     return flat_result
 
 
 # generate overall recommendation pair list
 start = time.time()
-rs_output = parallel(query, sample, 6)
+rs_output = parallel(query, range(len(df)), 6)
 print(time.time() - start)
 
 # output content_rs.json
@@ -302,20 +299,8 @@ df_output.to_json('data.json', orient='records')
 # with open('data.json') as f:
 #     zz = json.load(f)
 
-def test(ind, data=mat):
-    idx = data[ind, fts['id']]
-    cate_id = data[ind, fts['category_id']]
-    temp_data = data[data[:, fts['category_id']]==cate_id]
 
-sample = randint(0, len(data), 6)
-pool = Pool(processes=6)
-sample [1,100,1000,20000]
-%timeit test(0)
-%timeit pool.map(test, sample)
 
-%timeit query(0)
-%timeit pool.map_async(query, sample).get()
-%timeit pool.map(query, sample)
 
-sample = randint(0, len(data), 600)
-%timeit parallel(query, sample, 6)
+
+
