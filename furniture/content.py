@@ -1,6 +1,5 @@
 import json
 import nltk
-import re
 import time
 import utils
 import numpy as np
@@ -12,9 +11,6 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
 from sklearn.pipeline import make_pipeline
 from nltk.stem.snowball import SnowballStemmer
-from numpy.random import randint
-
-
 
 
 # read all furniture jsons
@@ -45,6 +41,11 @@ for file_name in glob('../../desktop/data/*.json'):
 
 # convert list into dataframe
 raw_df = pd.DataFrame(data)
+# combine skus that don't have groups and primary sku(first one) in each group
+no_group_df = raw_df.loc[raw_df.group_id.isnull()]
+group_df = raw_df.loc[raw_df.group_id.notnull()]
+primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
+raw_df = pd.concat([primary_df, no_group_df]).reset_index()
 
 
 # select key features
@@ -56,12 +57,18 @@ for i in range(len(features)):
     fts[features[i]] = i
 df = raw_df[features].copy()
 
-
 # pre-process data
 # convert to float
 df.price_hint = df.price_hint.astype(float)
 # fill missing
 df.price_hint.fillna(df.price_hint.median(), inplace=True)
+# drop two skus that do not have 'meaningful' titles
+df = df.drop(df.index[[76774, 113749]])
+
+#########
+output = df.dropna(subset=['products'])
+output = output.groupby('products').filter(lambda x: len(x) > 55)
+#########
 
 
 # tokenize and stem function for feature extraction
@@ -80,8 +87,6 @@ def tokenize_and_stem(text):
     return stems
 
 
-tf = TfidfVectorizer(analyzer='word', min_df=0, max_df=0.9, tokenizer=tokenize_and_stem, stop_words='english')
-tfidf_matrix = tf.fit_transform(df['title'])
 # 27315 terms(words)
 
 # seq = range(200, 601, 50)
@@ -97,7 +102,7 @@ def title_process(df):
     tf = TfidfVectorizer(analyzer='word', min_df=0, max_df=0.9, tokenizer=tokenize_and_stem, stop_words='english')
     tfidf_matrix = tf.fit_transform(df['title'])
     # Latent semantic analysis and re-normalization for tfidf matrix (dimension reduction)
-    svd = TruncatedSVD(n_components=350, algorithm='randomized', n_iter=5, random_state=None, tol=0.0)
+    svd = TruncatedSVD(n_components=300, algorithm='arpack', n_iter=5, random_state=None, tol=0.0)
     normalizer = Normalizer(copy=False)
     lsa = make_pipeline(svd, normalizer)
     tfidf_rd = lsa.fit_transform(tfidf_matrix)
@@ -105,6 +110,13 @@ def title_process(df):
 
 
 title_mat = title_process(df)
+
+####### for cluster analysis, using only products group size > 2
+title_mat = title_process(output)
+title_df = pd.DataFrame(title_mat)
+title_df['products'] = output['products'].values
+title_df.to_csv("lsi_mat.csv", sep=",", index=False)
+#######
 # col_name = ['t'+str(i) for i in range(200)]
 # df_clean = pd.concat([df, pd.DataFrame(title_mat, columns=col_name)], axis=1)
 mat = np.concatenate((df.values, title_mat), axis=1)
@@ -161,7 +173,13 @@ def prod_process(a, b):
 def price_process(a, b):
     i = a[fts['price_hint']]
     j = b[fts['price_hint']]
-    return np.abs(i - j)/(i + j)
+    if j < i:
+        result = (i - j)/(i + j)
+    elif j > 1.1 * a:
+        result = (j - 1.1 * a)/(i + j)
+    else:
+        result = 0
+    return result
 
 
 # brand processing
@@ -172,7 +190,7 @@ def brand_process(a, b):
 
 
 # calculate weighted distance
-def mixed_dist(a, b, prod_wt=0.5, brand_wt=0.2, title_wt=0.2, price_wt=0.1):
+def mixed_dist(b, a, prod_wt=0.5, brand_wt=0.2, title_wt=0.2, price_wt=0.1):
     # calculate title_dist
     title_dist = title_only(a, b)
     # calculate prod_dist
@@ -230,7 +248,7 @@ def query(ind, k=30, dist=mixed_dist, data=mat):
     temp_data = data[(data[:, fts['category_id']]==cate_id) & (indices!=ind)]
     if len(temp_data) == 0:
         return [{'idX': idx, 'idY': idx, 'score':1, 'method':'content_based_v1'}]
-    dist_mat = np.apply_along_axis(dist, axis=1, arr=temp_data, b=data[ind, :])
+    dist_mat = np.apply_along_axis(dist, axis=1, arr=temp_data, a=data[ind, :])
 
     if len(temp_data) > k:
         temp_ind = np.argpartition(dist_mat, k)[:k]

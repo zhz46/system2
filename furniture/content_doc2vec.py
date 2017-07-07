@@ -16,7 +16,6 @@ from gensim.models.keyedvectors import KeyedVectors
 
 
 
-
 # read all furniture jsons
 data = []
 for file_name in glob('../../desktop/data/*.json'):
@@ -45,7 +44,11 @@ for file_name in glob('../../desktop/data/*.json'):
 
 # convert list into dataframe
 raw_df = pd.DataFrame(data)
-
+# combine skus that don't have groups and primary sku(first one) in each group
+no_group_df = raw_df.loc[raw_df.group_id.isnull()]
+group_df = raw_df.loc[raw_df.group_id.notnull()]
+primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
+raw_df = pd.concat([primary_df, no_group_df]).reset_index()
 
 # select key features
 # features = ['title', 'category_id', 'category_level_0', 'category_level_1',
@@ -62,10 +65,12 @@ df.price_hint = df.price_hint.astype(float)
 # fill missing
 df.price_hint.fillna(df.price_hint.median(), inplace=True)
 # drop two skus that do not have 'meaningful' titles
-df = df.drop(df.index[[81656, 156522]])
+df = df.drop(df.index[[76774, 113749]])
 
-
-
+#########
+output = df.dropna(subset=['products'])
+output = output.groupby('products').filter(lambda x: len(x) > 55)
+#########
 
 # tokenize and stem function for feature extraction
 def text_process(text):
@@ -101,10 +106,6 @@ docs = np.array(docs)
 # corpus = [dictionary.doc2bow(text) for text in texts]
 
 
-# from Google news, 100 billion words; the model has 300 dim vectors for 3 million words and phrases
-# filename = 'GoogleNews-vectors-negative300.bin.gz'
-# word2vec_google = KeyedVectors.load_word2vec_format(filename, binary=True)
-
 # pre-trained model from fasttext
 model_ft = KeyedVectors.load_word2vec_format('../../Desktop/trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec')
 
@@ -115,16 +116,31 @@ def doc2vec_centroid(doc, wv):
     doc = [word for word in doc if word in wv.vocab]
     return np.mean(wv[doc], axis=0)
 
-# count=0
-# for i in range(len(docs)):
-#     new_doc = [word for word in docs[i] if word in model_ft.vocab]
-#     if len(new_doc)==0:
-#         print((i, docs[i]))
+
+###########
+titles = output.title.values
+# return processed titles bag of words
+docs = [text_process(title) for title in titles]
+docs = np.array(docs)
 
 
+title_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
+title_df = pd.DataFrame(title_mat)
+title_df['products'] = output['products'].values
+title_df.to_csv("centroid_mat.csv", sep=",", index=False)
+###########
+from doc2vec_weight import doc_to_vec
+from evaluation import cluster_eval
+title_mat = doc_to_vec(docs, model_ft)
+title_df = pd.DataFrame(title_mat)
+title_df['products'] = output['products'].values
+title_df.to_csv("wa_mat.csv", sep=",", index=False)
 
+cluster_eval(title_df, 70)
+###########
 # words mean representation of docs
 title_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
+
 mat = np.concatenate((df.values, title_mat), axis=1)
 
 
@@ -155,7 +171,13 @@ def prod_process(a, b):
 def price_process(a, b):
     i = a[fts['price_hint']]
     j = b[fts['price_hint']]
-    return np.abs(i - j)/(i + j)
+    if j < i:
+        result = (i - j)/(i + j)
+    elif j > 1.1 * a:
+        result = (j - 1.1 * a)/(i + j)
+    else:
+        result = 0
+    return result
 
 
 # brand processing
@@ -172,7 +194,7 @@ def title_only(a, b):
 
 
 # calculate weighted distance
-def mixed_dist(a, b, prod_wt=0.5, brand_wt=0.2, title_wt=0.2, price_wt=0.1):
+def mixed_dist(b, a, prod_wt=0.5, brand_wt=0.2, title_wt=0.2, price_wt=0.1):
     # calculate title_dist
     title_dist = title_only(a, b)
     # calculate prod_dist
@@ -226,7 +248,7 @@ def query(ind, k=30, dist=mixed_wm, data=ori, docs=docs):
     if len(temp_data) == 0:
         return [{'idX': idx, 'idY': idx, 'score':1, 'method':'content_based_v1'}]
     if dist == mixed_dist:
-        dist_mat = np.apply_along_axis(dist, axis=1, arr=temp_data, b=data[ind, :])
+        dist_mat = np.apply_along_axis(dist, axis=1, arr=temp_data, a=data[ind, :])
     else:
         temp_docs = docs[(data[:, fts['category_id']]==cate_id) & (indices!=ind)]
         dist_mat = [dist(data[ind, :], temp_data[i], docs[ind], temp_docs[i])
@@ -272,19 +294,3 @@ with open('content_wm.json', 'w') as f:
     json.dump(rs_output, f)
 
 query(0, k=10, dist=mixed_wm, data= df.values)
-
-
-
-
-for i in rs_output:
-    i['method'] = 'content_based_wm_v2.2'
-
-
-with open('content_centroid.json') as f:
-    zz= json.load(f)
-
-for i in zz:
-    i['method'] = 'content_based_centroid_v2.1'
-
-with open('content_centroid.json') as f:
-    zz = json.load(f)
