@@ -1,19 +1,23 @@
 import numpy as np
 from sklearn.decomposition import PCA
+from gensim import corpora
 
 
 # count = 0
 # for i in model_ft.vocab:
 #     count += model_ft.vocab[i].count
 
+# 51576208551 is total number words in the pretrained corpus
 def get_word_frequency(word, model):
     return model.vocab[word].count/51576208551
 
+def idf(word, dictionary):
+    return np.log(dictionary.num_docs/dictionary.dfs[dictionary.token2id[word]])
 
 # A SIMPLE BUT TOUGH TO BEAT BASELINE FOR SENTENCE EMBEDDINGS
 # convert a list of sentence with word2vec items into a set of sentence vectors
-def doc_to_vec(docs, model, embedding_size=300, a = 1e-3):
-
+def doc_to_vec(docs, model, algo, pca, embedding_size=300, a=0.001):
+    dictionary = corpora.Dictionary(docs)
     doc_set = []
     for doc in docs:
         doc = [word for word in doc if word in model.vocab]
@@ -21,11 +25,18 @@ def doc_to_vec(docs, model, embedding_size=300, a = 1e-3):
         doc_length = len(doc)
         word_vectors = model.wv[doc]
         for i in np.arange(doc_length):
-            a_value = a / (a + get_word_frequency(doc[i], model))  # smooth inverse frequency, SIF
+            if algo == "weight":
+                a_value = a / (a + get_word_frequency(doc[i], model))  # smooth inverse frequency, SIF
+            elif algo == "tfidf":
+                a_value = idf(doc[i], dictionary) # idf
+            else:
+                raise ValueError('Please use either weight or tfidf for algo')
             vs = np.add(vs, np.multiply(a_value, word_vectors[i]))  # vs += sif * word_vector
-
         vs = np.divide(vs, doc_length)  # weighted average
         doc_set.append(vs)  # add to our existing re-calculated set of sentences
+
+    if pca == 0:
+        return np.array(doc_set)
 
     # calculate PCA of this doc set
     pca = PCA(n_components=embedding_size)
@@ -41,7 +52,7 @@ def doc_to_vec(docs, model, embedding_size=300, a = 1e-3):
     # resulting sentence vectors, vs = vs -u x uT x vs
     doc_vecs = []
     for vs in doc_set:
-        sub = np.multiply(u,vs)
+        sub = np.multiply(u, vs)
         doc_vecs.append(np.subtract(vs, sub))
 
     return np.array(doc_vecs)
