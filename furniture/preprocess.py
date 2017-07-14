@@ -36,13 +36,17 @@ def data_load(files='../../desktop/data/*.json'):
 def pre_process(raw_data):
     # convert list into dataframe
     raw_df = pd.DataFrame(raw_data)
+    # for group with size 1, mark them as no_group skus
+    single_group_df = raw_df.groupby('group_id').filter(lambda x: len(x) <= 1)
+    raw_df.loc[single_group_df.index.values, 'group_id'] = np.nan
     # divide no_group skus, primary skus and secondary skus
-    no_group_df = raw_df.loc[raw_df.group_id.isnull()]
-    group_df = raw_df.loc[raw_df.group_id.notnull()]
-    primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
-    second_df = group_df.groupby('group_id').apply(lambda x: x.iloc[1:])
-    # concat above components in a better order for later
-    raw_df = pd.concat([primary_df, no_group_df, second_df]).reset_index()
+    # no_group_df = raw_df.loc[raw_df.group_id.isnull()]
+    # group_df = raw_df.loc[raw_df.group_id.notnull()]
+    # primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
+    # second_df = group_df.groupby('group_id').apply(lambda x: x.iloc[1:])
+    # # concat above components in a better order for later
+    # raw_df = pd.concat([primary_df, no_group_df, second_df]).reset_index()
+
     # save index for numpy array
     raw_df['original_index'] = raw_df.index
 
@@ -66,17 +70,17 @@ def pre_process(raw_data):
     return (df, fts)
 
 
-def map_generate(df):
-    # map secondary sku index to its primary sku index
-    second2primary = {}
-    # map primary sku index to its group index list
-    primary_neighbor = {}
-    # map group_id to its group index list
-    group_map = df.groupby('group_id').groups
-    for values in group_map.values():
-        primary_neighbor[values[0]] = values
-        for i in range(1, len(values)):
-            if values[i] not in second2primary:
-                second2primary[values[i]] = values[0]
-    return second2primary, primary_neighbor
+# def map_generate(df):
+#     # map secondary sku index to its primary sku index
+#     second2primary = {}
+#     # map primary sku index to its group index list
+#     primary_neighbor = {}
+#     # map group_id to its group index list
+#     group_map = df.groupby('group_id').groups
+#     for values in group_map.values():
+#         primary_neighbor[values[0]] = values
+#         for i in range(1, len(values)):
+#             if values[i] not in second2primary:
+#                 second2primary[values[i]] = values[0]
+#     return second2primary, primary_neighbor
 

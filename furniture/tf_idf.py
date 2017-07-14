@@ -12,6 +12,7 @@ from sklearn.pipeline import make_pipeline
 from nltk.stem.snowball import SnowballStemmer
 from preprocess import data_load, pre_process, map_generate
 from distance import mixed_dist
+from queue import PriorityQueue
 
 
 # tokenize and stem function for feature extraction
@@ -67,67 +68,60 @@ title_mat = title_process(titles)
 mat = np.concatenate((df.values, title_mat), axis=1)
 
 # build two maps for query
-second2primary, primary_neighbor = map_generate(df)
+# second2primary, primary_neighbor = map_generate(df)
 
 
 # generate top-k recommendation list given an index
-def query(query_ind, k=30, dist=mixed_dist, data=mat, fts=fts,
-          second2primary=second2primary, primary_neighbor=primary_neighbor):
-
-    # set a switch for secondary sku to primary sku
-    switch = 0
-    # store the start index of secondary sku
-    second_start = len(mat) - len(second2primary)
-
-    if query_ind >= second_start:    # if query sku is a secondary sku
-        ind = second2primary[query_ind]
-        switch = 1
-        if ind >= second_start:
-            raise ValueError('Not a primary sku')
-    else:                      # if query sku is a primary sku or non-group sku
-        ind = query_ind
-
+def query(ind, k=30, dist=mixed_dist, data=mat, fts=fts):
+    # get query data
     cal_data = data[ind]
-    cate_id = data[ind, fts['category_id']]
-    # get candidate data and calculate distance
-    temp_data = data[:second_start]
-    indices = np.arange(len(temp_data))
-    temp_data = temp_data[(temp_data[:, fts['category_id']] == cate_id) & (indices != ind)]
-    if len(temp_data) == 0:
-        return [{'idX': cal_data[fts['id']], 'idY': cal_data[fts['id']], 'score': 1, 'method': 'content_based_v2.1'}]
-    dist_mat = np.apply_along_axis(dist, axis=1, arr=temp_data, a=cal_data, fts=fts)
-    if len(temp_data) > k:
-        temp_ind = np.argpartition(dist_mat, k)[:k]
-        top_ind = temp_ind[np.argsort(dist_mat[temp_ind])]
-    else:
-        top_ind = np.argsort(dist_mat)
-    top_score = dist_mat[top_ind]
-    top_idy = temp_data[top_ind, fts['id']]
+    cate_id = cal_data[fts['category_id']]
+    # get candidate data, with same category_id and not itself
+    indices = np.arange(len(data))
+    candidate_data = data[(data[:, fts['category_id']] == cate_id) & (indices != ind)]
 
-    # get original index of top skus
-    top_ori_index = temp_data[top_ind, fts['original_index']]
-    result = []
-    for i in range(len(top_idy)):
-        # if recommend sku is primary sku, calculate nearest one in the group
-        if top_ori_index[i] < len(primary_neighbor):
-            group_i = primary_neighbor[top_ori_index[i]]
-            group_data = data[group_i]
-            # if original query sku is secondary, then use original data to calculate
-            if switch == 1:
-                cal_data = data[query_ind]
-            group_dist = np.apply_along_axis(dist, axis=1, arr=group_data, a=cal_data, fts=fts)
-            best_ind = np.argmin(group_dist)
-            value = group_dist[best_ind]
-            idy = group_data[best_ind, fts['id']]
-        else:
-            idy = top_idy[i]
-            value = top_score[i]
+    # if no candidate data
+    if len(candidate_data) == 0:
+        return [{'idX': cal_data[fts['id']], 'idY': 'N/A', 'score': 'N/A', 'method': 'content_based_v3.1'}]
+
+    # calculate similarity for each candidate
+    dist_mat = np.apply_along_axis(dist, axis=1, arr=candidate_data, a=cal_data, fts=fts)
+    sim_mat = 1 - dist_mat
+    candidate_id = candidate_data[:, fts['id']]
+    candidate_gid = candidate_data[:, fts['group_id']]
+
+    # use PQ to get top k recommendation
+    pq = PriorityQueue()
+    group_max = {}
+    # put no_group sku into PQ and max group sku in map
+    for i in range(len(sim_mat)):
+        if pd.isnull(candidate_gid[i]):     # if no group_id
+            pq.put((sim_mat[i], candidate_id[i]))
+        elif candidate_gid[i] not in group_max:  # has a new group_id
+            group_max[candidate_gid[i]] = (sim_mat[i], candidate_id[i])
+        else:   # has a old group_id
+            if group_max[candidate_gid[i]][0] < sim_mat[i]:
+                group_max[candidate_gid[i]] = (sim_mat[i], candidate_id[i])
+            else:
+                continue
+        if pq.qsize() > k:
+            pq.get()
+    # put max group sku in PQ
+    for values in group_max.values():
+        pq.put(values)
+        if pq.qsize() > k:
+            pq.get()
+    # move recommendations out from PQ
+    rs_size = pq.qsize()
+    result = [0] * rs_size
+    for i in range(rs_size-1, -1, -1):
+        output = pq.get()
         pair = dict()
-        pair['idX'] = data[query_ind, fts['id']]
-        pair['idY'] = idy
-        pair['method'] = 'content_based_v2.1'
-        pair['score'] = 1 - value
-        result.append(pair)
+        pair['idX'] = cal_data[fts['id']]
+        pair['idY'] = output[1]
+        pair['method'] = 'content_based_v3.1'
+        pair['score'] = output[0]
+        result[i] = pair
     return result
 
 
