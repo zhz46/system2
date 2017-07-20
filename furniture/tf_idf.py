@@ -1,55 +1,12 @@
 import json
-import nltk
 import time
-import utils
 import numpy as np
 import pandas as pd
-from multiprocessing import Pool
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import TruncatedSVD
-from sklearn.preprocessing import Normalizer
-from sklearn.pipeline import make_pipeline
-from nltk.stem.snowball import SnowballStemmer
-from preprocess import data_load, pre_process, map_generate
-from distance import mixed_dist
 from queue import PriorityQueue
+from multiprocessing import Pool
 
-
-# tokenize and stem function for feature extraction
-def tokenize_and_stem(text):
-    # load nltk's stemmer object
-    stemmer = SnowballStemmer("english")
-    # text cleanup
-    text = utils.analyze(text)
-
-    tokens = [word for sent in nltk.sent_tokenize(text) for word in nltk.word_tokenize(sent)]
-    # filtered_tokens = []
-    # for token in tokens:
-    #     if re.search('[a-zA-Z]', token):
-    #         filtered_tokens.append(token)
-    stems = [stemmer.stem(t) for t in tokens]
-    return stems
-
-
-# seq = range(200, 601, 50)
-# var_track = []
-# for i in seq:
-#     svd = TruncatedSVD(n_components=i, algorithm='randomized', n_iter=5, random_state=None, tol=0.0)
-#     tfidf_rd = svd.fit_transform(tfidf_matrix)
-#     var_track.append(svd.explained_variance_ratio_.sum())
-
-
-# title processing
-def title_process(titles):
-    # calculate tfidf matrix for title
-    tf = TfidfVectorizer(analyzer='word', min_df=0, max_df=0.9, tokenizer=tokenize_and_stem, stop_words='english')
-    tfidf_matrix = tf.fit_transform(titles)
-    # Latent semantic analysis and re-normalization for tfidf matrix (dimension reduction)
-    svd = TruncatedSVD(n_components=300, algorithm='arpack', n_iter=5, random_state=None, tol=0.0)
-    normalizer = Normalizer(copy=False)
-    lsa = make_pipeline(svd, normalizer)
-    tfidf_rd = lsa.fit_transform(tfidf_matrix)
-    return tfidf_rd
+from preprocess import data_load, pre_process, title_process
+from distance import mixed_dist
 
 
 # load raw_data

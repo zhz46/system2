@@ -1,30 +1,20 @@
-from sklearn.model_selection import train_test_split, GridSearchCV, validation_curve
-from sklearn.metrics import matthews_corrcoef, roc_auc_score, accuracy_score, log_loss, classification_report
-from sklearn.preprocessing import LabelEncoder, label_binarize
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import log_loss, classification_report
+from sklearn.preprocessing import LabelEncoder
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score as ari, adjusted_mutual_info_score as amis
 from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
 
 
-
-def cluster_eval(df, k_clust):
+def cluster_eval(X_all, y_all, k_clust):
     # encode products
     le = LabelEncoder()
-    products_group = le.fit_transform(df.products)
-    df = df.drop('products', axis=1)
-    train = df.values
+    products_group = le.fit_transform(y_all)
     # kmeans
     kmeans = KMeans(n_clusters=k_clust)
-    cluster_group = kmeans.fit_predict(train)
-
+    cluster_group = kmeans.fit_predict(X_all)
     return (ari(products_group, cluster_group), amis(products_group, cluster_group))
 
-
-# load data
-# lsi_df = pd.read_csv("lsi_mat.csv", sep=",")
-# centroid_df = pd.read_csv("centroid_mat.csv", sep=",")
-# wa_df = pd.read_csv("wa_mat.csv", sep=",")
 
 # start k-fold validation to tune hyperparameters
 # def tune_parameter(X, y, clf, parameters):
@@ -40,11 +30,10 @@ def train_predict(X_train, y_train, X_test, y_test, clf):
            log_loss(y_test, y_prob))
 
 
-def class_eval(df, **pars):
+def class_eval(X_all, y_all, **pars):
     # encode categorical variables
     le = LabelEncoder()
-    y_all = le.fit_transform(df.products)
-    X_all = df.drop('products', 1).values
+    y_all = le.fit_transform(y_all)
     # Split data to training and testing set
     X_train, X_test, y_train, y_test = train_test_split(X_all, y_all, test_size=0.3, random_state=11)
 
@@ -60,13 +49,3 @@ def class_eval(df, **pars):
     # clf = KNeighborsClassifier()
     acc, ls = train_predict(X_train, y_train, X_test, y_test, clf)
     return (acc, ls)
-
-
-
-
-
-
-
-
-
-

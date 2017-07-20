@@ -1,52 +1,17 @@
 import json
-import nltk
 import time
-import utils
 import numpy as np
 import pandas as pd
 from multiprocessing import Pool
 from sklearn.preprocessing import normalize
-from nltk.corpus import stopwords
 from gensim import corpora, models
 from gensim.models.word2vec import Word2Vec
 from gensim.models.keyedvectors import KeyedVectors
-from preprocess import data_load, pre_process
-from distance import mixed_dist
-from doc2vec_weight import doc_to_vec
 from queue import PriorityQueue
 
-
-
-# tokenize and stem function for feature extraction
-def text_process(text):
-    # text cleanup
-    text = utils.analyze(text)
-    # load stop_words
-    stop_words = stopwords.words('english')
-    # tokens filtered out stopwords
-    tokens = [word for sent in nltk.sent_tokenize(text) for word in nltk.word_tokenize(sent) if word not in stop_words]
-    return tokens
-
-
-# filter out vectors without words in corpus
-def df_filter(df, wv):
-    # return titles array
-    titles = df.title.values
-    # return processed titles bag of words
-    docs = [text_process(title) for title in titles]
-    docs = np.array(docs)
-    filter_list = [any([word in wv.vocab for word in doc]) for doc in docs]
-    docs = docs[filter_list]
-    df = df.loc[filter_list].copy().reset_index(drop=True)
-    df.original_index = df.index
-    return df, docs
-
-
-# centroid doc2vec representation
-def doc2vec_centroid(doc, wv):
-    # remove out-of-vocabulary words
-    doc = [word for word in doc if word in wv.vocab]
-    return np.mean(wv[doc], axis=0)
+from preprocess import data_load, pre_process, df_filter, doc2vec_centroid
+from distance import mixed_dist
+from doc2vec_weight import doc_to_vec
 
 
 # load raw_data
@@ -142,7 +107,6 @@ with open('doc2vec_centroid.json', 'w') as f:
 
 
 
-#
 # if __name__ == "__main__":
 #     main()
 
