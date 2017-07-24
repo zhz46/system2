@@ -38,7 +38,7 @@ del data
 
 # inner join text df and image df
 df = pd.merge(df_image, df_text, on='id', how='inner')
-df = df.sort_values(by='category_id').reset_index(drop=False)
+df = df.sort_values(by='category_id').reset_index(drop=True)
 
 # expand prelogits into its own dataframe
 df_prelogit = df.prelogits.apply(pd.Series)

@@ -21,22 +21,19 @@ def data_load(files='../../desktop/new_data/*.json'):
     for file_name in glob(files):
         with open(file_name) as f:
             temp = json.load(f)
-            for sku in temp:
+            for sku in temp[:]:
                 # read parent product list and product list
-                parent_prod = list(sku['elasticsearch_result']['parentProducts'].keys())
-                prod = list(sku['elasticsearch_result']['products'].keys())
+                parent_prod = set(sku['elasticsearch_result']['parentProducts'].keys())
+                prod = set(sku['elasticsearch_result']['products'].keys())
                 image = sku['main_image']['raw']
                 sku['image_url'] = image
                 if parent_prod:
-                    sku['parentProducts'] = parent_prod[0]
-                    if prod[0] == parent_prod[0]:
-                        sku['products'] = prod[1]
-                    else:
-                        sku['products'] = prod[0]
+                    sku['parentProducts'] = ' and '.join(sorted(parent_prod))
+                    sku['products'] = ' and '.join(sorted(prod - parent_prod))
                 else:
                     sku['parentProducts'] = np.nan
                     if prod:
-                        sku['products'] = prod[0]
+                        sku['products'] = ' and '.join(sorted(prod))
                     else:
                         sku['products'] = np.nan
                 for key in list(sku.keys()):
@@ -60,18 +57,17 @@ def pre_process(raw_data):
     # # concat above components in a better order for later
     # raw_df = pd.concat([primary_df, no_group_df, second_df]).reset_index()
 
-    # save index for numpy array
-    raw_df['original_index'] = raw_df.index
 
     # select key features
     # features = ['title', 'category_id', 'category_level_0', 'category_level_1',
     #             'brand', 'attributes', 'price_hint', 'description', 'sku_id']
     features = ['products', 'parentProducts', 'brand', 'price_hint',
-                'title', 'category_id', 'group_id', 'id', 'original_index']
+                'title', 'category_id', 'group_id', 'id']
     fts = {}
     for i in range(len(features)):
         fts[features[i]] = i
     df = raw_df[features].copy()
+    df = df.sort_values(by='category_id').reset_index(drop=True)
 
     # pre-process data
     # convert to float
@@ -82,6 +78,14 @@ def pre_process(raw_data):
     # df = df.drop(df.index[[76774, 113749]])
     return (df, fts)
 
+
+def product_map(file="../dat/pp_map.txt"):
+    pp_map = {}
+    with open(file) as f:
+        for line in f:
+            tokens = line.split('=>')
+            pp_map[tokens[0].strip()] = tokens[1].strip()
+    return pp_map
 
 # def map_generate(df):
 #     # map secondary sku index to its primary sku index
