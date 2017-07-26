@@ -45,7 +45,7 @@ def query(ind, k=30, dist=mixed_dist, data=mat, fts=fts, map=category_map):
         return [{'idX': cal_data[fts['id']], 'idY': 'N/A', 'score': 'N/A', 'method': 'content_based_v3.1'}]
 
     # calculate similarity for each candidate
-    dist_mat = np.apply_along_axis(dist, axis=1, arr=candidate_data, a=cal_data, fts=fts)
+    dist_mat = np.apply_along_axis(dist, axis=1, arr=candidate_data, b=cal_data, fts=fts)
     sim_mat = 1 - dist_mat
     candidate_id = candidate_data[:, fts['id']]
     candidate_gid = candidate_data[:, fts['group_id']]

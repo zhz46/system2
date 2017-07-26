@@ -8,6 +8,7 @@ from queue import PriorityQueue
 from sklearn.preprocessing import normalize
 
 from preprocess import data_load, pre_process
+from distance import image_only
 
 input1 = '/srv/zz/temp/*.json'
 input2 = '/yg/analytics/rex/tensorflow/image2vec/dat/output/raw/18000*.json'
@@ -62,11 +63,6 @@ for key, value in category_map.items():
     value = value[0], value[-1] + 1
     category_map[key] = value
 
-def image_only(b, a, fts):
-    image_dist = np.dot(a[len(fts):], b[len(fts):])
-    # image_dist = np.linalg.norm(a[len(fts):] - b[len(fts):])
-    return image_dist
-
 
 def query(ind, k=30, dist=image_only, data=mat, fts=fts, map=category_map):
     # get query data
@@ -81,8 +77,8 @@ def query(ind, k=30, dist=image_only, data=mat, fts=fts, map=category_map):
         return [{'idX': cal_data[fts['id']], 'idY': 'N/A', 'score': 'N/A', 'method': 'image_similarity_v1'}]
 
     # calculate similarity for each candidate
-    sim_mat = np.apply_along_axis(dist, axis=1, arr=candidate_data, a=cal_data, fts=fts)
-    # sim_mat = 1 - dist_mat
+    dist_mat = np.apply_along_axis(dist, axis=1, arr=candidate_data, b=cal_data, fts=fts)
+    sim_mat = 1 - dist_mat
     candidate_id = candidate_data[:, fts['id']]
     candidate_gid = candidate_data[:, fts['group_id']]
 
@@ -137,7 +133,7 @@ rs_output = parallel(query, range(len(df)), 6)
 print(time.time() - start)
 
 # output content_rs.json
-with open('image_sim.json', 'w') as f:
+with open('../output/image_sim.json', 'w') as f:
     json.dump(rs_output, f)
 
 

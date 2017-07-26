@@ -8,7 +8,6 @@ def prod_process(a, b, fts):
     if pd.isnull(a[fts['products']]) or pd.isnull(b[fts['products']]):
         prod_dist = 0.8
     # same products
-    elif a[fts['products']] == b[fts['products']]:
         prod_dist = 0
     # one's product is same as another's parentProduct
     elif a[fts['products']] == b[fts['parentProducts']] or b[fts['products']] == a[fts['parentProducts']]:
@@ -51,8 +50,14 @@ def title_only(a, b, fts):
     return title_dist
 
 
+def image_only(a, b, fts):
+    image_dist = 1 - np.dot(a[len(fts):], b[len(fts):])
+    # image_dist = np.linalg.norm(a[len(fts):] - b[len(fts):])
+    return image_dist
+
+
 # calculate weighted distance
-def mixed_dist(b, a, fts, prod_wt=0.5, brand_wt=0.2, title_wt=0.2, price_wt=0.1):
+def mixed_dist(a, b, fts, prod_wt=0.5, brand_wt=0.2, title_wt=0.2, price_wt=0.1):
     # calculate title_dist
     title_dist = title_only(a, b, fts)
     # calculate prod_dist

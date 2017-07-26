@@ -17,7 +17,7 @@ def data_load(files='../../desktop/new_data/*.json'):
     # read all furniture jsons
     data = []
     features = ['products', 'parentProducts', 'brand', 'price_hint',
-                'title', 'category_id', 'group_id', 'id', 'image_url']
+                'title', 'category_id', 'group_id', 'id', 'image_url', 'sku_id']
     for file_name in glob(files):
         with open(file_name) as f:
             temp = json.load(f)
@@ -62,7 +62,7 @@ def pre_process(raw_data):
     # features = ['title', 'category_id', 'category_level_0', 'category_level_1',
     #             'brand', 'attributes', 'price_hint', 'description', 'sku_id']
     features = ['products', 'parentProducts', 'brand', 'price_hint',
-                'title', 'category_id', 'group_id', 'id']
+                'title', 'category_id', 'group_id', 'id', 'sku_id']
     fts = {}
     for i in range(len(features)):
         fts[features[i]] = i
