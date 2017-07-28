@@ -6,8 +6,9 @@ import time
 from glob import glob
 from multiprocessing import Pool
 from sklearn.preprocessing import normalize
+from gensim.models.keyedvectors import KeyedVectors
 
-from preprocess import data_load, pre_process, title_process, text_process, doc2vec_centroid, product_map
+from preprocess import data_load, pre_process, title_process, df_filter, text_process, doc2vec_centroid, product_map
 from distance import title_only, image_only
 
 
@@ -130,7 +131,7 @@ second_mat = mat[len(primary_df)+len(no_group_df):].copy()
 
 
 # generate top-k recommendation list given an index
-def score(idx, dist=image_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
+def score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
           category_map=category_map, co_view_map = co_view_map):
 
     co_view_dict = co_view_map[idx]
@@ -176,6 +177,55 @@ tfidf_score = parallel(score, list(co_view_map.keys()))
 tfidf_score = np.array(tfidf_score)
 ratio = np.sum(tfidf_score, axis=0)[0]/np.sum(tfidf_score, axis=0)[1]
 
+
+###########################################
+# doc2vec centroid
+# pre-trained model from fasttext
+model_ft = KeyedVectors.load_word2vec_format(
+    '../../Desktop/trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec')
+
+# filter out empty bags of word
+df, _ = df_filter(df, model_ft)
+
+# generate maps
+co_view_map, sec2pri = generate_map(df, co_view)
+
+# divide df to 3 parts
+no_group_df = df.loc[df.group_id.isnull()]
+group_df = df.loc[df.group_id.notnull()]
+primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
+second_df = group_df.groupby('group_id').apply(lambda x: x.iloc[1:])
+
+# generate candidate df for calculation
+candidate_df = pd.concat([primary_df, no_group_df]).reset_index(drop=True)
+candidate_df = candidate_df.sort_values(by='category_id').reset_index(drop=True)
+
+# build map
+category_map = candidate_df.groupby('category_id').groups
+for key, value in category_map.items():
+    value = value[0], value[-1] + 1
+    category_map[key] = value
+
+# stack everything for title process
+new_df = pd.concat([candidate_df, second_df]).reset_index(drop=True)
+
+titles = new_df.title.values
+docs = [text_process(title) for title in titles]
+docs = np.array(docs)
+
+# words mean representation of docs
+title_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
+# title_mat = normalize(doc_to_vec(docs=docs, model=model_ft, algo='weight', pca=1))
+# combine title and other features
+mat = np.concatenate((new_df.values.copy(), title_mat), axis=1)
+
+# divide mats
+candidate_mat = mat[:len(primary_df)+len(no_group_df)].copy()
+second_mat = mat[len(primary_df)+len(no_group_df):].copy()
+
+centroid_score = parallel(score, list(co_view_map.keys()))
+centroid_score = np.array(centroid_score)
+ratio = np.sum(centroid_score, axis=0)[0]/np.sum(centroid_score, axis=0)[1]
 
 
 ###########################################

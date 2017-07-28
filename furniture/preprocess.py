@@ -13,7 +13,7 @@ from sklearn.pipeline import make_pipeline
 import utils
 
 
-def data_load(files='../../desktop/new_data/*.json'):
+def data_load(files='../dat/data/18000*.json'):
     # read all furniture jsons
     data = []
     features = ['products', 'parentProducts', 'brand', 'price_hint',
@@ -158,7 +158,6 @@ def df_filter(df, wv):
     filter_list = [any([word in wv.vocab for word in doc]) for doc in docs]
     docs = docs[filter_list]
     df = df.loc[filter_list].copy().reset_index(drop=True)
-    df.original_index = df.index
     return df, docs
 
 
