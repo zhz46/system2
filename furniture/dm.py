@@ -2,19 +2,18 @@ import json
 import time
 import numpy as np
 from sklearn.preprocessing import normalize
-from gensim.models.keyedvectors import KeyedVectors
+from gensim.models.doc2vec import Doc2Vec
 
-from preprocess import data_load, pre_process, df_filter, doc2vec_centroid
+from preprocess import data_load, pre_process, text_process
 from distance import mixed_dist
 from tools import query, parallel
-from doc2vec_weight import doc_to_vec
 
 
 input = '../dat/data/18000*.json'
-output1 = '../output/doc2vec_centroid.json'
-output2 = '../output/doc2vec_weight.json'
-trained_model = '../../Desktop/trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec'
-method_name = 'content_based_v3.2'
+output = '../output/doc2vec_dm.json'
+trained_model = '../trained_models/dm.model'
+trained_model_full = '../trained_models/dm.model_full'
+method_name = 'content_based_v3.4'
 
 # load raw_data
 raw_data = data_load(input)
@@ -22,15 +21,17 @@ raw_data = data_load(input)
 # pre_process data
 df, fts = pre_process(raw_data)
 
-# pre-trained model from fasttext
-model_ft = KeyedVectors.load_word2vec_format(trained_model)
+# pre-trained model from gensim doc2vec
+model_dm = Doc2Vec.load(trained_model_full)
 
-# filter out empty bags of word
-df, docs = df_filter(df, model_ft)
+# return titles array
+titles = df.title.values
+# return processed titles bag of words
+docs = [text_process(title) for title in titles]
 
 # words mean representation of docs
-title_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
-# title_mat = normalize(doc_to_vec(docs=docs, model=model_ft, algo='weight', pca=1))
+# title_mat = normalize(np.array([model_dm.infer_vector(doc) for doc in docs]))
+title_mat = normalize(np.array([model_dm.docvecs['t_%s' % i] for i in range(len(docs))]))
 mat = np.concatenate((df.values.copy(), title_mat), axis=1)
 
 # build map
@@ -50,7 +51,7 @@ rs_output = parallel(query_wrapper, range(len(df)), 6)
 print(time.time() - start)
 
 # output content_rs.json
-with open(output1, 'w') as f:
+with open(output, 'w') as f:
     json.dump(rs_output, f)
 
 

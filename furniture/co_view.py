@@ -2,14 +2,26 @@ import sqlite3
 import numpy as np
 import pandas as pd
 import json
+import pickle
 import time
 from glob import glob
-from multiprocessing import Pool
 from sklearn.preprocessing import normalize
+from multiprocessing import Pool
 from gensim.models.keyedvectors import KeyedVectors
+from gensim.models.doc2vec import Doc2Vec
 
 from preprocess import data_load, pre_process, title_process, df_filter, text_process, doc2vec_centroid, product_map
 from distance import title_only, image_only
+
+
+co_view_query = '../dat/co_view_query.pkl'
+text_input = '../dat/data/18000*.json'
+image_input = '../dat/raw/18000*.json'
+# text_input = '/srv/zz/temp/18000*.json'
+# image_input = '/yg/analytics/rex/tensorflow/image2vec/dat/output/raw/18000*.json'
+word2vec_model = '../trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec'
+doc2vec_model = '../trained_models/dm.model'
+doc2vec_model_full = '../trained_models/dm.model_full'
 
 
 def weight_series(length, ini=0.95):
@@ -19,7 +31,7 @@ def weight_series(length, ini=0.95):
     return np.array(weights)
 
 
-def co_view_select(sqlite_file = '../dat/rexagm.db'):
+def co_view_select(sqlite_file):
     conn = sqlite3.connect(sqlite_file)
     c = conn.cursor()
     # # store table column names
@@ -82,60 +94,38 @@ def generate_map(df, co_view):
     return co_view_map, sec2pri
 
 
-# select co_view data from sqlite database
-co_view = co_view_select()
+def df_sort(df):
+    # divide df to 3 parts
+    no_group_df = df.loc[df.group_id.isnull()]
+    group_df = df.loc[df.group_id.notnull()]
+    primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
+    second_df = group_df.groupby('group_id').apply(lambda x: x.iloc[1:])
 
-# load raw_data
-raw_data = data_load()
+    # generate candidate df for calculation
+    candidate_df = pd.concat([primary_df, no_group_df]).reset_index(drop=True)
+    candidate_df = candidate_df.sort_values(by='category_id').reset_index(drop=True)
 
-# pre_process data
-df, fts = pre_process(raw_data)
+    # build map
+    category_map = candidate_df.groupby('category_id').groups
+    for key, value in category_map.items():
+        value = value[0], value[-1] + 1
+        category_map[key] = value
 
-
-##############################################
-# tf-idf score
-# generate maps
-co_view_map, sec2pri = generate_map(df, co_view)
-
-# divide df to 3 parts
-no_group_df = df.loc[df.group_id.isnull()]
-group_df = df.loc[df.group_id.notnull()]
-primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
-second_df = group_df.groupby('group_id').apply(lambda x: x.iloc[1:])
-
-# generate candidate df for calculation
-candidate_df = pd.concat([primary_df, no_group_df]).reset_index(drop=True)
-candidate_df = candidate_df.sort_values(by='category_id').reset_index(drop=True)
-
-# build map
-category_map = candidate_df.groupby('category_id').groups
-for key, value in category_map.items():
-    value = value[0], value[-1] + 1
-    category_map[key] = value
-
-# stack everything for title process
-new_df = pd.concat([candidate_df, second_df]).reset_index(drop=True)
-
-# return titles array
-titles = new_df.title.values
-
-# process unstructured titles
-title_mat = title_process(titles)
-
-# combine title and other features
-mat = np.concatenate((new_df.values.copy(), title_mat), axis=1)
-
-# divide mats
-candidate_mat = mat[:len(primary_df)+len(no_group_df)].copy()
-second_mat = mat[len(primary_df)+len(no_group_df):].copy()
+    # stack everything for title process
+    new_df = pd.concat([candidate_df, second_df]).reset_index(drop=True)
+    return new_df, category_map
 
 
-# generate top-k recommendation list given an index
-def score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
-          category_map=category_map, co_view_map = co_view_map):
+def combo_dist(a, b, fts, wt):
+    title_dist = (1 - np.dot(a[len(fts): len(fts)+300], b[len(fts): len(fts)+300])) * 0.5
+    image_dist = 1 - np.dot(a[(len(fts)+300):], b[(len(fts)+300):])
+    return wt * title_dist + (1 - wt) * image_dist
 
+
+# calculate importance score for each sku
+def score(idx, dist, candidate_mat, second_mat, fts, category_map, co_view_map, wt):
+    # get co_view dict for the query sku
     co_view_dict = co_view_map[idx]
-
     # get query data
     if idx in sec2pri:
         cal_data = second_mat[second_mat[:,fts['sku_id']] == idx]
@@ -147,7 +137,10 @@ def score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_m
     # get candidate data, with same category_id and not itself
     candidate_data = candidate_mat[cate_index[0]:cate_index[1]]
     # calculate similarity for each candidate
-    dist_mat = np.apply_along_axis(dist, axis=1, arr=candidate_data, b=cal_data, fts=fts)
+    if dist == 'combo_dist':
+        dist_mat = np.apply_along_axis(combo_dist, axis=1, arr=candidate_data, b=cal_data, fts=fts, wt=wt)
+    else:
+        dist_mat = np.apply_along_axis(dist, axis=1, arr=candidate_data, b=cal_data, fts=fts)
 
     # sort candidate data
     index_arr = np.argsort(dist_mat)
@@ -170,19 +163,58 @@ def score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_m
 def parallel(func, chunk, p=6):
     pool = Pool(processes=p)
     result = pool.map_async(func, chunk).get()
+    pool.close()
     return result
 
+# co_view = co_view_select(sqlite_file)
+# with open('../dat/co_view_query.pkl', 'wb') as output:
+#     pickle.dump(co_view, output, pickle.HIGHEST_PROTOCOL)
 
-tfidf_score = parallel(score, list(co_view_map.keys()))
+with open(co_view_query, 'rb') as f:
+    co_view = pickle.load(f)
+
+# load raw_data
+raw_data = data_load(text_input)
+
+# pre_process data
+df, fts = pre_process(raw_data)
+
+##############################################
+# tf-idf score
+# generate maps
+co_view_map, sec2pri = generate_map(df, co_view)
+
+new_df, category_map = df_sort(df)
+
+# return titles array
+titles = new_df.title.values
+
+# process unstructured titles
+title_mat = title_process(titles)
+
+# combine title and other features
+mat = np.concatenate((new_df.values.copy(), title_mat), axis=1)
+
+# divide mats
+candidate_mat = mat[:(len(df) - len(sec2pri))].copy()
+second_mat = mat[(len(df) - len(sec2pri)):].copy()
+
+
+# make a wrapper for score function
+def score_text(idx):
+    return score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
+          category_map=category_map, co_view_map = co_view_map, wt=0)
+
+
+tfidf_score = parallel(score_text, list(co_view_map.keys()))
 tfidf_score = np.array(tfidf_score)
-ratio = np.sum(tfidf_score, axis=0)[0]/np.sum(tfidf_score, axis=0)[1]
-
+tfidf_ratio = np.sum(tfidf_score, axis=0)[0]/np.sum(tfidf_score, axis=0)[1]
+print(tfidf_ratio)
 
 ###########################################
 # doc2vec centroid
 # pre-trained model from fasttext
-model_ft = KeyedVectors.load_word2vec_format(
-    '../../Desktop/trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec')
+model_ft = KeyedVectors.load_word2vec_format(word2vec_model)
 
 # filter out empty bags of word
 df, _ = df_filter(df, model_ft)
@@ -190,24 +222,7 @@ df, _ = df_filter(df, model_ft)
 # generate maps
 co_view_map, sec2pri = generate_map(df, co_view)
 
-# divide df to 3 parts
-no_group_df = df.loc[df.group_id.isnull()]
-group_df = df.loc[df.group_id.notnull()]
-primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
-second_df = group_df.groupby('group_id').apply(lambda x: x.iloc[1:])
-
-# generate candidate df for calculation
-candidate_df = pd.concat([primary_df, no_group_df]).reset_index(drop=True)
-candidate_df = candidate_df.sort_values(by='category_id').reset_index(drop=True)
-
-# build map
-category_map = candidate_df.groupby('category_id').groups
-for key, value in category_map.items():
-    value = value[0], value[-1] + 1
-    category_map[key] = value
-
-# stack everything for title process
-new_df = pd.concat([candidate_df, second_df]).reset_index(drop=True)
+new_df, category_map = df_sort(df)
 
 titles = new_df.title.values
 docs = [text_process(title) for title in titles]
@@ -216,25 +231,60 @@ docs = np.array(docs)
 # words mean representation of docs
 title_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
 # title_mat = normalize(doc_to_vec(docs=docs, model=model_ft, algo='weight', pca=1))
-# combine title and other features
 mat = np.concatenate((new_df.values.copy(), title_mat), axis=1)
 
 # divide mats
-candidate_mat = mat[:len(primary_df)+len(no_group_df)].copy()
-second_mat = mat[len(primary_df)+len(no_group_df):].copy()
+candidate_mat = mat[:(len(df) - len(sec2pri))].copy()
+second_mat = mat[(len(df) - len(sec2pri)):].copy()
 
-centroid_score = parallel(score, list(co_view_map.keys()))
+
+# make a wrapper for score function
+def score_text(idx):
+    return score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
+          category_map=category_map, co_view_map=co_view_map, wt=0)
+
+centroid_score = parallel(score_text, list(co_view_map.keys()))
 centroid_score = np.array(centroid_score)
-ratio = np.sum(centroid_score, axis=0)[0]/np.sum(centroid_score, axis=0)[1]
-
+centroid_ratio = np.sum(centroid_score, axis=0)[0]/np.sum(centroid_score, axis=0)[1]
 
 ###########################################
-# image score
+# doc2vec dm
+# load pretrained dm model
+model_dm = Doc2Vec.load(doc2vec_model_full)
+
+# generate maps
+co_view_map, sec2pri = generate_map(df, co_view)
+
+new_df, category_map = df_sort(df)
+
+# return titles array
+titles = new_df.title.values
+# return processed titles bag of words
+docs = [text_process(title) for title in titles]
+
+# words mean representation of docs
+title_mat = normalize(np.array([model_dm.docvecs['t_%s' % i] for i in range(len(docs))]))
+mat = np.concatenate((new_df.values.copy(), title_mat), axis=1)
+
+# divide mats
+candidate_mat = mat[:(len(df) - len(sec2pri))].copy()
+second_mat = mat[(len(df) - len(sec2pri)):].copy()
+
+# make a wrapper for score function
+def score_text(idx):
+    return score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
+          category_map=category_map, co_view_map=co_view_map, wt=0)
+
+dm_score = parallel(score_text, list(co_view_map.keys()))
+dm_score = np.array(dm_score)
+dm_ratio = np.sum(dm_score, axis=0)[0]/np.sum(dm_score, axis=0)[1]
+
+###########################################
+# text + image score
 # read all image jsons
-files = '../../desktop/raw/18000*.json'
 data = []
 features = ['id', 'prelogits']
-for file_name in glob(files):
+for file_name in glob(image_input):
     with open(file_name) as f:
         temp = json.load(f)
         for sku in temp:
@@ -254,28 +304,17 @@ df = pd.merge(df_image, df, on='id', how='inner')
 # generate maps
 co_view_map, sec2pri = generate_map(df, co_view)
 
-# divide df to 3 parts
-no_group_df = df.loc[df.group_id.isnull()]
-group_df = df.loc[df.group_id.notnull()]
-primary_df = group_df.groupby('group_id').apply(lambda x: x.iloc[0])
-second_df = group_df.groupby('group_id').apply(lambda x: x.iloc[1:])
-
-# generate candidate df for calculation
-candidate_df = pd.concat([primary_df, no_group_df]).reset_index(drop=True)
-candidate_df = candidate_df.sort_values(by='category_id').reset_index(drop=True)
-
-# build map
-category_map = candidate_df.groupby('category_id').groups
-for key, value in category_map.items():
-    value = value[0], value[-1] + 1
-    category_map[key] = value
-
-# stack everything for title process
-new_df = pd.concat([candidate_df, second_df]).reset_index(drop=True)
+new_df, category_map = df_sort(df)
 
 # expand prelogits into its own dataframe
 df_prelogit = new_df.prelogits.apply(pd.Series)
 prelogit_mat = normalize(df_prelogit.values)
+
+# return titles array
+titles = new_df.title.values
+
+# process unstructured titles
+title_mat = title_process(titles)
 
 features = ['sku_id', 'group_id', 'category_id']
 # build feature index
@@ -287,16 +326,34 @@ for i in range(len(features)):
 index_mat = new_df[features].values.copy()
 
 # concat original
-mat = np.concatenate((index_mat, prelogit_mat), axis=1)
+# mat = np.concatenate((index_mat, prelogit_mat), axis=1)
+mat = np.concatenate((index_mat, title_mat, prelogit_mat), axis=1)
 
 # divide mats
-candidate_mat = mat[:len(primary_df)+len(no_group_df)].copy()
-second_mat = mat[len(primary_df)+len(no_group_df):].copy()
+candidate_mat = mat[:(len(df) - len(sec2pri))].copy()
+second_mat = mat[(len(df) - len(sec2pri)):].copy()
 
-# generate image scores
-start = time.time()
-image_score = parallel(score, list(co_view_map.keys()))
-print(time.time() - start)
-image_score = np.array(image_score)
-ratio = np.sum(image_score, axis=0)[0]/np.sum(image_score, axis=0)[1]
-print(ratio)
+
+# # make a wrapper for score function
+# def score_image(idx):
+#     return score(idx, dist=image_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
+#           category_map=category_map, co_view_map=co_view_map, wt=1)
+#
+# # generate image scores
+# image_score = parallel(score_image, list(co_view_map.keys()))
+# image_score = np.array(image_score)
+# image_ratio = np.sum(image_score, axis=0)[0]/np.sum(image_score, axis=0)[1]
+# print(image_ratio)
+
+# calculate importance score for each sku
+for i in np.arange(0.1, 1, 0.05):
+    start = time.time()
+    def score_combo(idx):
+        return score(idx, dist='combo_dist', candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
+              category_map=category_map, co_view_map=co_view_map, wt=i)
+
+    combo_score = parallel(score_combo, list(co_view_map.keys()))
+    combo_score = np.array(combo_score)
+    ratio = np.sum(combo_score, axis=0)[0] / np.sum(combo_score, axis=0)[1]
+    print(ratio)
+    print(time.time()-start)
