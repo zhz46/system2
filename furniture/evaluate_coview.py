@@ -10,7 +10,8 @@ from multiprocessing import Pool
 from gensim.models.keyedvectors import KeyedVectors
 from gensim.models.doc2vec import Doc2Vec
 
-from preprocess import data_load, pre_process, title_process, df_filter, text_process, doc2vec_centroid, product_map
+from preprocess import data_load, pre_process, title_process, df_filter, text_process, doc2vec_centroid, product_map, doc2vec_tfidf
+from doc2vec_weight import doc_to_vec
 from distance import title_only, image_only
 
 
@@ -19,10 +20,8 @@ text_input = '../dat/data/18000*.json'
 image_input = '../dat/raw/18000*.json'
 # text_input = '/srv/zz/temp/18000*.json'
 # image_input = '/yg/analytics/rex/tensorflow/image2vec/dat/output/raw/18000*.json'
-word2vec_model = '../trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec'
+word2vec_model = '../trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_3_wordNgrams_3_ws_5.vec'
 doc2vec_model = '../trained_models/dm.model'
-doc2vec_model_full = '../trained_models/dm.model_full'
-
 
 def weight_series(length, ini=0.95):
     weights = []
@@ -203,7 +202,7 @@ second_mat = mat[(len(df) - len(sec2pri)):].copy()
 # make a wrapper for score function
 def score_text(idx):
     return score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
-          category_map=category_map, co_view_map = co_view_map, wt=0)
+          category_map=category_map, co_view_map = co_view_map, wt=1)
 
 
 tfidf_score = parallel(score_text, list(co_view_map.keys()))
@@ -225,12 +224,13 @@ co_view_map, sec2pri = generate_map(df, co_view)
 new_df, category_map = df_sort(df)
 
 titles = new_df.title.values
-docs = [text_process(title) for title in titles]
+docs = [text_process(title, model_ft) for title in titles]
 docs = np.array(docs)
 
 # words mean representation of docs
+# title_mat = normalize(doc2vec_tfidf(docs, model_ft))
 title_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
-# title_mat = normalize(doc_to_vec(docs=docs, model=model_ft, algo='weight', pca=1))
+# title_mat = normalize(doc_to_vec(docs=docs, model=model_ft, algo='tfidf', pca=1))
 mat = np.concatenate((new_df.values.copy(), title_mat), axis=1)
 
 # divide mats
@@ -241,7 +241,7 @@ second_mat = mat[(len(df) - len(sec2pri)):].copy()
 # make a wrapper for score function
 def score_text(idx):
     return score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
-          category_map=category_map, co_view_map=co_view_map, wt=0)
+          category_map=category_map, co_view_map=co_view_map, wt=1)
 
 centroid_score = parallel(score_text, list(co_view_map.keys()))
 centroid_score = np.array(centroid_score)
@@ -250,7 +250,7 @@ centroid_ratio = np.sum(centroid_score, axis=0)[0]/np.sum(centroid_score, axis=0
 ###########################################
 # doc2vec dm
 # load pretrained dm model
-model_dm = Doc2Vec.load(doc2vec_model_full)
+model_dm = Doc2Vec.load(doc2vec_model)
 
 # generate maps
 co_view_map, sec2pri = generate_map(df, co_view)
@@ -260,10 +260,10 @@ new_df, category_map = df_sort(df)
 # return titles array
 titles = new_df.title.values
 # return processed titles bag of words
-docs = [text_process(title) for title in titles]
+docs = [text_process(title, model_dm) for title in titles]
 
 # words mean representation of docs
-title_mat = normalize(np.array([model_dm.docvecs['t_%s' % i] for i in range(len(docs))]))
+title_mat = normalize(np.array([model_dm.infer_vector(doc) for doc in docs]))
 mat = np.concatenate((new_df.values.copy(), title_mat), axis=1)
 
 # divide mats
@@ -273,11 +273,11 @@ second_mat = mat[(len(df) - len(sec2pri)):].copy()
 # make a wrapper for score function
 def score_text(idx):
     return score(idx, dist=title_only, candidate_mat=candidate_mat, second_mat=second_mat, fts=fts,
-          category_map=category_map, co_view_map=co_view_map, wt=0)
+          category_map=category_map, co_view_map=co_view_map)
 
 dm_score = parallel(score_text, list(co_view_map.keys()))
-dm_score = np.array(dm_score)
-dm_ratio = np.sum(dm_score, axis=0)[0]/np.sum(dm_score, axis=0)[1]
+dm_score = np.array(centroid_score)
+dm_ratio = np.sum(centroid_score, axis=0)[0]/np.sum(centroid_score, axis=0)[1]
 
 ###########################################
 # text + image score
