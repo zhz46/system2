@@ -1,17 +1,15 @@
 import sqlite3
 import numpy as np
 import pandas as pd
-import json
 import pickle
 import time
-from glob import glob
 from sklearn.preprocessing import normalize
 from multiprocessing import Pool
 from gensim.models.keyedvectors import KeyedVectors
 from gensim.models.doc2vec import Doc2Vec
 
-from preprocess import data_load, pre_process, title_process, df_filter, text_process, doc2vec_centroid, product_map, doc2vec_tfidf
-from distance import title_only, image_only
+from preprocess import data_load, pre_process, title_process, image_merge, df_filter, text_process, doc2vec_centroid, product_map, doc2vec_tfidf
+from distance import title_only, image_only, combo_dist
 
 
 co_view_query = '../dat/co_view_query.pkl'
@@ -115,12 +113,6 @@ def df_sort(df):
     return new_df, category_map
 
 
-def combo_dist(a, b, fts, wt):
-    title_dist = (1 - np.dot(a[len(fts): len(fts)+300], b[len(fts): len(fts)+300])) * 0.5
-    image_dist = 1 - np.dot(a[(len(fts)+300):], b[(len(fts)+300):])
-    return wt * title_dist + (1 - wt) * image_dist
-
-
 # calculate importance score for each sku
 def score(idx, candidate_mat, second_mat, fts, sec2pri, category_map, co_view_map, **kwargs):
     # get co_view dict for the query sku
@@ -166,34 +158,14 @@ def parallel(func, chunk, p=6):
     return result
 
 
-def image_merge(df, image_input):
-    # read all image jsons
-    data = []
-    features = ['id', 'prelogits']
-    for file_name in glob(image_input):
-        with open(file_name) as f:
-            temp = json.load(f)
-            for sku in temp:
-                for key in list(sku.keys()):
-                    if key not in features:
-                        del sku[key]
-            data = data + temp
-
-    # convert to df
-    df_image = pd.DataFrame(data)
-
-    # inner join text df and image df
-    df = pd.merge(df_image, df, on='id', how='inner')
-    return df
-
-
 # co_view = co_view_select(sqlite_file)
 # with open('../dat/co_view_query.pkl', 'wb') as output:
 #     pickle.dump(co_view, output, pickle.HIGHEST_PROTOCOL)
 
 # text + image score
-method = 'tfidf_weighted'
-model_pars = {'model': word2vec_model, 'image_input': image_input}
+model_pars = {'image_input': image_input,
+              'method' : 'tfidf_weighted_word2vec'}
+
 with open(co_view_query, 'rb') as f:
     co_view = pickle.load(f)
 
@@ -203,13 +175,13 @@ raw_data = data_load(text_input)
 # pre_process data
 df, fts = pre_process(raw_data)
 
-if method in ['centroid', 'tfidf_weighted']:
-    model_path = model_pars['model']
+if model_pars['method'] in ['mean_word2vec', 'tfidf_weighted_word2vec']:
+    model_path = word2vec_model
     model_ft = KeyedVectors.load_word2vec_format(model_path)
     # filter out empty bags of word
     df, _ = df_filter(df, model_ft)
-if method == 'dm':
-    model_path = model_pars['model']
+if model_pars['method'] == 'dm':
+    model_path = doc2vec_model
     model_ft = Doc2Vec.load(model_path)
 
 # inner join text and image data
@@ -225,20 +197,20 @@ new_df, category_map = df_sort(df)
 # return titles array
 titles = new_df.title.values
 
-if method == 'lsa':
+if model_pars['method'] == 'lsa':
     title_mat = title_process(titles)
-elif method == 'tfidf_weighted':
+elif model_pars['method'] == 'tfidf_weighted_word2vec':
     docs = np.array([text_process(title, model_ft) for title in titles])
     title_mat = normalize(doc2vec_tfidf(docs, model_ft))
     # title_mat = normalize(doc_to_vec(docs=docs, model=model_ft, algo='tfidf', pca=1))
-elif method == 'centroid':
+elif model_pars['method'] == 'mean_word2vec':
     docs = np.array([text_process(title, model_ft) for title in titles])
     title_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
-elif method == 'dm':
+elif model_pars['method'] == 'dm':
     docs = [text_process(title, model_ft) for title in titles]
     title_mat = normalize(np.array([model_ft.infer_vector(doc) for doc in docs]))
 else:
-    raise Exception("ERROR: " + method + ' not found')
+    raise Exception("ERROR: " + model_pars['method'] + ' not found')
 
 features = ['sku_id', 'group_id', 'category_id']
 # build feature index

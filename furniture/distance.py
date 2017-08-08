@@ -56,6 +56,12 @@ def image_only(a, b, fts):
     return image_dist
 
 
+def combo_dist(a, b, fts, wt):
+    title_dist = (1 - np.dot(a[len(fts): len(fts)+300], b[len(fts): len(fts)+300])) * 0.5
+    image_dist = 1 - np.dot(a[(len(fts)+300):], b[(len(fts)+300):])
+    return wt * title_dist + (1 - wt) * image_dist
+
+
 # calculate weighted distance
 def mixed_dist(a, b, fts, prod_wt=0.5, brand_wt=0.2, title_wt=0.2, price_wt=0.1):
     # calculate title_dist

@@ -63,7 +63,7 @@ def pre_process(raw_data):
     # features = ['title', 'category_id', 'category_level_0', 'category_level_1',
     #             'brand', 'attributes', 'price_hint', 'description', 'sku_id']
     features = ['products', 'parentProducts', 'brand', 'price_hint',
-                'title', 'category_id', 'group_id', 'id', 'sku_id']
+                'title', 'category_id', 'group_id', 'id', 'sku_id', 'image_url']
     fts = {}
     for i in range(len(features)):
         fts[features[i]] = i
@@ -75,9 +75,28 @@ def pre_process(raw_data):
     df.price_hint = df.price_hint.astype(float)
     # fill missing
     df.price_hint.fillna(df.price_hint.median(), inplace=True)
-    # drop two skus that do not have 'meaningful' titles
-    # df = df.drop(df.index[[76774, 113749]])
     return (df, fts)
+
+
+def image_merge(df, image_input):
+    # read all image jsons
+    data = []
+    features = ['id', 'prelogits']
+    for file_name in glob(image_input):
+        with open(file_name) as f:
+            temp = json.load(f)
+            for sku in temp:
+                for key in list(sku.keys()):
+                    if key not in features:
+                        del sku[key]
+            data = data + temp
+
+    # convert to df
+    df_image = pd.DataFrame(data)
+
+    # inner join text df and image df
+    df = pd.merge(df_image, df, on='id', how='inner')
+    return df
 
 
 def product_map(file="../dat/pp_map.txt"):
