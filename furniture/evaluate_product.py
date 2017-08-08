@@ -1,17 +1,22 @@
 import json
 import numpy as np
-import pandas as pd
 from glob import glob
 from sklearn.preprocessing import normalize
 from gensim.models.keyedvectors import KeyedVectors
+from gensim.models.doc2vec import Doc2Vec
 
-from preprocess import data_load, pre_process, title_process, text_process, doc2vec_centroid, product_map
+from preprocess import data_load, pre_process, title_process, text_process, doc2vec_centroid, product_map, doc2vec_tfidf
 from evaluation import cluster_eval, class_eval
 from doc2vec_weight import doc_to_vec
 
 
+text_input = '../dat/data/18000*.json'
+doc2vec_model = '../trained_models/dm.model_full'
+word2vec_model = '../trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec'
+
+
 # load raw_data
-raw_data = data_load()
+raw_data = data_load(text_input)
 
 # pre_process data
 df, fts = pre_process(raw_data)
@@ -41,16 +46,18 @@ for i in seq:
 # 2. doc2vec test
 ################
 # pre-trained model from fasttext
-model_ft = KeyedVectors.load_word2vec_format('../../Desktop/trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec')
+model_ft = KeyedVectors.load_word2vec_format(word2vec_model)
+# model_ft = Doc2Vec.load(word2vec_model)
 
 # return processed titles bag of words
-docs = [text_process(title) for title in titles]
+docs = [text_process(title, model_ft) for title in titles]
 docs = np.array(docs)
 
 
 # 2.1 centroid method
 ####################
-centroid_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
+# centroid_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
+centroid_mat = normalize(doc2vec_tfidf(docs, model_ft))
 cluster_eval(centroid_mat, df_test['products'].values, 20)
 
 result = []
@@ -77,6 +84,15 @@ seq = [0.1, 1, 2, 5, 10, 20, 50, 100, 1000]
 for i in seq:
     result.append(class_eval(weight_mat, df_test['products'].values, C=i))
 
+# 2.3 dm
+########################
+dm_mat = normalize(np.array([model_ft.docvecs['t_%s' % i] for i in range(len(docs))]))
+cluster_eval(dm_mat, df_test['products'].values, 20)
+
+result = []
+seq = [0.1, 1, 2, 5, 10, 20, 50, 100, 1000]
+for i in seq:
+    result.append(class_eval(dm_mat, df_test['products'].values, C=i))
 
 # 3. image2vec
 ########################

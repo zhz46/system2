@@ -8,15 +8,18 @@ from matplotlib import pyplot as plt
 from preprocess import data_load, pre_process
 
 
+input = '../dat/data/18000*.json'
+word2vec_model = '../trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_3_wordNgrams_3_ws_5.vec'
+
+
 # load raw_data
-raw_data = data_load()
+raw_data = data_load(input)
 
 # pre_process data
 df, fts = pre_process(raw_data)
 
 # pre-trained model from fasttext
-model_ft = KeyedVectors.load_word2vec_format(
-    '../../Desktop/trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec')
+model_ft = KeyedVectors.load_word2vec_format(word2vec_model)
 
 raw_list = list(df.products.value_counts()[:80].index)
 raw_list.extend(['playstation', 'xbox', 'iphone', 'xiaomi', 'console', 'cat', 'dog'])

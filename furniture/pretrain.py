@@ -44,7 +44,7 @@ df, fts = pre_process(raw_data)
 
 # build list of TaggedDocument objects from titles
 titles = df.title.values
-docs = [text_process(title) for title in titles]
+docs = [text_process(title, trained_model_full) for title in titles]
 
 for i, row in enumerate(docs):
     alldocs.append(TaggedDocument(row, ['t_%s' % i]))

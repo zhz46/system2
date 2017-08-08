@@ -9,6 +9,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
 from sklearn.pipeline import make_pipeline
+from gensim import corpora, models
 
 import utils
 
@@ -138,31 +139,45 @@ def title_process(titles):
 
 
 # tokenize and stem function for feature extraction
-def text_process(text):
+def text_process(text, model):
     # text cleanup
     text = utils.analyze(text)
     # load stop_words
     stop_words = stopwords.words('english')
     # tokens filtered out stopwords
-    tokens = [word for sent in nltk.sent_tokenize(text) for word in nltk.word_tokenize(sent) if word not in stop_words]
+    tokens = [word for sent in nltk.sent_tokenize(text) for word in nltk.word_tokenize(sent)
+              if word not in stop_words and word in model.wv.vocab]
     return tokens
 
 
 # filter out vectors without words in corpus
-def df_filter(df, wv):
+def df_filter(df, model):
     # return titles array
     titles = df.title.values
     # return processed titles bag of words
-    docs = [text_process(title) for title in titles]
+    docs = [text_process(title, model) for title in titles]
     docs = np.array(docs)
-    filter_list = [any([word in wv.vocab for word in doc]) for doc in docs]
+    filter_list = [any([word in model.wv.vocab for word in doc]) for doc in docs]
     docs = docs[filter_list]
     df = df.loc[filter_list].copy().reset_index(drop=True)
     return df, docs
 
 
 # centroid doc2vec representation
-def doc2vec_centroid(doc, wv):
+def doc2vec_centroid(doc, model):
     # remove out-of-vocabulary words
-    doc = [word for word in doc if word in wv.vocab]
-    return np.mean(wv[doc], axis=0)
+    doc = [word for word in doc if word in model.wv.vocab]
+    return np.mean(model.wv[doc], axis=0)
+
+
+# tf-idf weighted word vectors
+def doc2vec_tfidf(docs, model):
+    dictionary = corpora.Dictionary(docs)
+    corpus = [dictionary.doc2bow(doc) for doc in docs]
+    tfidf = models.TfidfModel(corpus)
+    corpus_tfidf = tfidf[corpus]
+    title_mat = np.zeros((len(corpus_tfidf), 300))
+    for i in range(len(corpus_tfidf)):
+        score_sum = np.sum(corpus_tfidf[i], axis=0)[1]
+        title_mat[i, :] = np.sum([model.wv[dictionary[id]] * score / score_sum for id, score in corpus_tfidf[i]], axis=0)
+    return title_mat

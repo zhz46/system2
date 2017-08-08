@@ -13,7 +13,7 @@ from doc2vec_weight import doc_to_vec
 input = '../dat/data/18000*.json'
 output1 = '../output/doc2vec_centroid.json'
 output2 = '../output/doc2vec_weight.json'
-trained_model = '../../Desktop/trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_1.vec'
+word2vec_model = '../trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_3_wordNgrams_3_ws_5.vec'
 method_name = 'content_based_v3.2'
 
 # load raw_data
@@ -23,7 +23,7 @@ raw_data = data_load(input)
 df, fts = pre_process(raw_data)
 
 # pre-trained model from fasttext
-model_ft = KeyedVectors.load_word2vec_format(trained_model)
+model_ft = KeyedVectors.load_word2vec_format(word2vec_model)
 
 # filter out empty bags of word
 df, docs = df_filter(df, model_ft)
