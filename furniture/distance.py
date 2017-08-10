@@ -46,20 +46,47 @@ def brand_process(a, b, fts):
 
 # calculate title distance only
 def title_only(a, b, fts):
-    title_dist = (1 - np.dot(a[len(fts):], b[len(fts):])) * 0.5
+    title_dist = (1 - np.dot(a[fts['title'][0]: fts['title'][1]], b[fts['title'][0]: fts['title'][1]])) * 0.5
     return title_dist
 
 
 def image_only(a, b, fts):
-    image_dist = 1 - np.dot(a[len(fts):], b[len(fts):])
+    image_dist = 1 - np.dot(a[fts['image']:], b[fts['image']:])
     # image_dist = np.linalg.norm(a[len(fts):] - b[len(fts):])
     return image_dist
 
 
 def combo_dist(a, b, fts, wt):
-    title_dist = (1 - np.dot(a[len(fts): len(fts)+300], b[len(fts): len(fts)+300])) * 0.5
-    image_dist = 1 - np.dot(a[(len(fts)+300):], b[(len(fts)+300):])
-    return wt * title_dist + (1 - wt) * image_dist
+    title_dist = title_only(a, b, fts)
+    title_wt = wt['title_wt']
+    if wt['prod_wt'] != 0:
+        prod_dist = prod_process(a, b, fts)
+        prod_wt = wt['prod_wt']
+    else:
+        prod_dist = 0
+        prod_wt = 0
+    if wt['image_wt'] != 0:
+        image_dist = image_only(a, b, fts)
+        image_wt = wt['image_wt']
+    else:
+        image_dist = 0
+        image_wt = 0
+    if wt['brand_wt'] != 0:
+        brand_dist = brand_process(a, b, fts)
+        brand_wt = wt['brand_wt']
+    else:
+        brand_dist = 0
+        brand_wt = 0
+    if wt['price_wt'] != 0:
+        price_dist = price_process(a, b, fts)
+        price_wt = wt['price_wt']
+    else:
+        price_dist = 0
+        price_wt = 0
+    wt_list = [title_wt, image_wt, prod_wt, brand_wt, price_wt]
+    dist_list = [title_dist, image_dist, prod_dist, brand_dist, price_dist]
+    distance = np.dot(wt_list, dist_list)
+    return distance
 
 
 # calculate weighted distance

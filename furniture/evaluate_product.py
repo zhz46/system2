@@ -6,8 +6,7 @@ from gensim.models.keyedvectors import KeyedVectors
 from gensim.models.doc2vec import Doc2Vec
 
 from preprocess import data_load, pre_process, title_process, text_process, doc2vec_centroid, product_map, doc2vec_tfidf
-from evaluation import cluster_eval, class_eval
-from doc2vec_weight import doc_to_vec
+from evaluate_tools import cluster_eval, class_eval
 
 
 text_input = '../dat/data/18000*.json'

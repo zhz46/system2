@@ -2,11 +2,11 @@ import numpy as np
 import pandas as pd
 from multiprocessing import Pool
 from queue import PriorityQueue
-from distance import title_only, image_only, combo_dist
+from distance import combo_dist, mixed_dist
 
 
 # generate top-k recommendation list given an index
-def query(ind, k, data, fts, map, method_name, **kwargs):
+def query(ind, k, data, fts, map, method_name, wt):
     # get query data
     cal_data = data[ind]
     cate_id = cal_data[fts['category_id']]
@@ -19,10 +19,8 @@ def query(ind, k, data, fts, map, method_name, **kwargs):
         return [{'idX': cal_data[fts['id']], 'idY': 'N/A', 'score': 'N/A', 'method': method_name}]
 
     # calculate similarity for each candidate
-    if 'wt' in kwargs:
-        dist_mat = np.apply_along_axis(combo_dist, axis=1, arr=candidate_data, b=cal_data, fts=fts, wt=kwargs['wt'])
-    else:
-        dist_mat = np.apply_along_axis(title_only, axis=1, arr=candidate_data, b=cal_data, fts=fts)
+    dist_mat = np.apply_along_axis(combo_dist, axis=1, arr=candidate_data, b=cal_data, fts=fts, wt=wt)
+    # dist_mat = np.apply_along_axis(mixed_dist, axis=1, arr=candidate_data, b=cal_data, fts=fts)
     sim_mat = 1 - dist_mat
     candidate_id = candidate_data[:, fts['id']]
     candidate_gid = candidate_data[:, fts['group_id']]
