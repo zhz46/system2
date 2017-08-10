@@ -32,14 +32,14 @@ model_pars = {'weight': {'title_wt': 0.2,
 raw_data = data_load(text_input)
 
 # pre_process data
-df, _ = pre_process(raw_data)
+df = pre_process(raw_data)
 
 # load model
 if model_pars['method'] in ['mean_word2vec', 'tfidf_word2vec']:
     model_path = word2vec_model
     model_ft = KeyedVectors.load_word2vec_format(model_path)
     # filter out empty bags of word
-    df, _ = df_filter(df, model_ft)
+    df = df_filter(df, model_ft)
 if model_pars['method'] == 'dm':
     model_path = doc2vec_model
     model_ft = Doc2Vec.load(model_path)
@@ -50,6 +50,12 @@ if model_pars['weight']['image_wt'] != 0:
 
 # sort df by category
 df = df.sort_values(by='category_id').reset_index(drop=True)
+
+# build map
+category_map = df.groupby('category_id').groups
+for key, value in category_map.items():
+    value = value[0], value[-1] + 1
+    category_map[key] = value
 
 # return titles array
 titles = df.title.values
@@ -91,12 +97,6 @@ if model_pars['weight']['image_wt'] != 0:
     fts['image'] = fts['title'][1]
 else:
     mat = np.concatenate((index_mat, title_mat), axis=1)
-
-# build map
-category_map = df.groupby('category_id').groups
-for key, value in category_map.items():
-    value = value[0], value[-1] + 1
-    category_map[key] = value
 
 # make a wrapper of query function
 def query_wrapper(ind):

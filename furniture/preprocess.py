@@ -57,16 +57,8 @@ def pre_process(raw_data):
     # second_df = group_df.groupby('group_id').apply(lambda x: x.iloc[1:])
     # # concat above components in a better order for later
     # raw_df = pd.concat([primary_df, no_group_df, second_df]).reset_index()
-
-
-    # select key features
-    # features = ['title', 'category_id', 'category_level_0', 'category_level_1',
-    #             'brand', 'attributes', 'price_hint', 'description', 'sku_id']
     features = ['products', 'parentProducts', 'brand', 'price_hint',
                 'title', 'category_id', 'group_id', 'id', 'sku_id', 'image_url']
-    fts = {}
-    for i in range(len(features)):
-        fts[features[i]] = i
     df = raw_df[features].copy()
     df = df.sort_values(by='category_id').reset_index(drop=True)
 
@@ -75,7 +67,7 @@ def pre_process(raw_data):
     df.price_hint = df.price_hint.astype(float)
     # fill missing
     df.price_hint.fillna(df.price_hint.median(), inplace=True)
-    return (df, fts)
+    return df
 
 
 def image_merge(df, image_input):
@@ -175,11 +167,9 @@ def df_filter(df, model):
     titles = df.title.values
     # return processed titles bag of words
     docs = [text_process(title, model) for title in titles]
-    docs = np.array(docs)
     filter_list = [any([word in model.wv.vocab for word in doc]) for doc in docs]
-    docs = docs[filter_list]
     df = df.loc[filter_list].copy().reset_index(drop=True)
-    return df, docs
+    return df
 
 
 # centroid doc2vec representation
