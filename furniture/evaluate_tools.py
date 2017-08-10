@@ -9,7 +9,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score as ari, adjusted_mutual_info_score as amis
 from sklearn.linear_model import LogisticRegression
 
-from distance import title_only, combo_dist, mixed_dist
+from distance import combo_dist, mixed_dist
 
 
 
@@ -164,11 +164,10 @@ def score(idx, candidate_mat, second_mat, fts, sec2pri, category_map, co_view_ma
     cate_index = category_map[cate_id]
     # get candidate data, with same category_id and not itself
     candidate_data = candidate_mat[cate_index[0]:cate_index[1]]
+
     # calculate similarity for each candidate
-    if wt['weight']:
-        dist_mat = np.apply_along_axis(combo_dist, axis=1, arr=candidate_data, b=cal_data, fts=fts, wt=wt)
-    else:
-        dist_mat = np.apply_along_axis(mixed_dist, axis=1, arr=candidate_data, b=cal_data, fts=fts)
+    dist_mat = np.apply_along_axis(combo_dist, axis=1, arr=candidate_data, b=cal_data, fts=fts, wt=wt)
+    # dist_mat = np.apply_along_axis(mixed_dist, axis=1, arr=candidate_data, b=cal_data, fts=fts)
 
     # sort candidate data
     index_arr = np.argsort(dist_mat)
