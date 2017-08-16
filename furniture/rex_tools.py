@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from multiprocessing import Pool
 from queue import PriorityQueue
-from distance import combo_dist, mixed_dist
+from distance import combo_dist
 
 
 # generate top-k recommendation list given an index
