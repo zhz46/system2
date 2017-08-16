@@ -2,6 +2,7 @@ import json
 import numpy as np
 import pandas as pd
 import nltk
+import re
 from nltk.stem.snowball import SnowballStemmer
 from nltk.corpus import stopwords
 from glob import glob
@@ -11,7 +12,7 @@ from sklearn.preprocessing import Normalizer
 from sklearn.pipeline import make_pipeline
 from gensim import corpora, models
 
-import utils
+import text_clean
 
 
 def data_load(files='../dat/data/18000*.json'):
@@ -62,7 +63,6 @@ def pre_process(raw_data):
     df = raw_df[features].copy()
     df = df.sort_values(by='category_id').reset_index(drop=True)
 
-    # pre-process data
     # convert to float
     df.price_hint = df.price_hint.astype(float)
     # fill missing
@@ -118,7 +118,7 @@ def tokenize_and_stem(text):
     # load nltk's stemmer object
     stemmer = SnowballStemmer("english")
     # text cleanup
-    text = utils.analyze(text)
+    text = text_clean.analyze(text)
     tokens = [word for sent in nltk.sent_tokenize(text) for word in nltk.word_tokenize(sent)]
     # filtered_tokens = []
     # for token in tokens:
@@ -152,7 +152,7 @@ def title_process(titles):
 # tokenize and stem function for feature extraction
 def text_process(text, model):
     # text cleanup
-    text = utils.analyze(text)
+    text = text_clean.analyze(text)
     # load stop_words
     stop_words = stopwords.words('english')
     # tokens filtered out stopwords
@@ -190,3 +190,73 @@ def doc2vec_tfidf(docs, model):
         score_sum = np.sum(corpus_tfidf[i], axis=0)[1]
         title_mat[i, :] = np.sum([model.wv[dictionary[id]] * score / score_sum for id, score in corpus_tfidf[i]], axis=0)
     return title_mat
+
+
+def product2vec(products, model):
+    raw_list = list(products)
+    product_mat = np.zeros((len(products), 300))
+    for i in range(len(raw_list)):
+        if pd.isnull(raw_list[i]):
+            product_mat[i, :] = np.random.uniform(-0.25, 0.25, 300)
+        else:
+            tokens = re.split(' and |\s', raw_list[i])
+            tokens = [token for token in tokens if token in model.wv.vocab]
+            if not tokens:
+                product_mat[i, :] = np.random.uniform(-0.25, 0.25, 300)
+            else:
+                product_mat[i, :] = np.mean(model.wv[tokens], axis=0)
+    return product_mat
+
+
+# from sklearn.decomposition import PCA
+#
+#
+# # 51576208551 is total number words in the pretrained corpus
+# def get_word_frequency(word, model):
+#     return model.vocab[word].count/51576208551
+#
+# def idf(word, dictionary):
+#     return np.log(dictionary.num_docs/dictionary.dfs[dictionary.token2id[word]])
+#
+# # A SIMPLE BUT TOUGH TO BEAT BASELINE FOR SENTENCE EMBEDDINGS
+# # convert a list of sentence with word2vec items into a set of sentence vectors
+# def doc_to_vec(docs, model, algo, pca, embedding_size=300, a=0.001):
+#     dictionary = corpora.Dictionary(docs)
+#     doc_set = []
+#     for doc in docs:
+#         doc = [word for word in doc if word in model.vocab]
+#         vs = np.zeros(embedding_size)  # add all word2vec values into one vector for the sentence
+#         doc_length = len(doc)
+#         word_vectors = model.wv[doc]
+#         for i in np.arange(doc_length):
+#             if algo == "weight":
+#                 a_value = a / (a + get_word_frequency(doc[i], model))  # smooth inverse frequency, SIF
+#             elif algo == "tfidf":
+#                 a_value = idf(doc[i], dictionary) # idf
+#             else:
+#                 raise ValueError('Please use either weight or tfidf for algo')
+#             vs = np.add(vs, np.multiply(a_value, word_vectors[i]))  # vs += sif * word_vector
+#         vs = np.divide(vs, doc_length)  # weighted average
+#         doc_set.append(vs)  # add to our existing re-calculated set of sentences
+#
+#     if pca == 0:
+#         return np.array(doc_set)
+#
+#     # calculate PCA of this doc set
+#     pca = PCA(n_components=embedding_size)
+#     pca.fit(np.array(doc_set))
+#     u = pca.components_[0]  # the PCA vector
+#     u = np.multiply(u, np.transpose(u))  # u x uT
+#
+#     # pad the vector?  (occurs if we have less sentences than embeddings_size)
+#     if len(u) < embedding_size:
+#         for i in range(embedding_size - len(u)):
+#             u = np.append(u, 0)  # add needed extension for multiplication below
+#
+#     # resulting sentence vectors, vs = vs -u x uT x vs
+#     doc_vecs = []
+#     for vs in doc_set:
+#         sub = np.multiply(u, vs)
+#         doc_vecs.append(np.subtract(vs, sub))
+#
+#     return np.array(doc_vecs)

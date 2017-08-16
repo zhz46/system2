@@ -6,25 +6,25 @@ from sklearn.preprocessing import normalize
 from gensim.models.keyedvectors import KeyedVectors
 from gensim.models.doc2vec import Doc2Vec
 
-from preprocess import data_load, pre_process, image_merge, df_filter, title_process, text_process, doc2vec_tfidf, doc2vec_centroid
+from preprocess import data_load, pre_process, image_merge, df_filter, title_process, text_process, doc2vec_tfidf, doc2vec_centroid, product2vec
 from rex_tools import query, parallel
 
-text_input = '../dat/data/18000*.json'
-image_input = '../dat/raw/18000*.json'
-# text_input = '/srv/zz/temp/18000*.json'
-# image_input = '/yg/analytics/rex/tensorflow/image2vec/dat/output/raw/18000*.json'
-rex_output = '../output/old_sim.json'
+# text_input = '../dat/data/18000*.json'
+# image_input = '../dat/raw/18000*.json'
+text_input = '/srv/zz/temp/18000*.json'
+image_input = '/yg/analytics/rex/tensorflow/image2vec/dat/output/raw/18000*.json'
+rex_output = '../output/image_tfidf_word2vec.json'
 data_output = '../output/data.json'
 word2vec_model = '../trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_3_wordNgrams_3_ws_5.vec'
 doc2vec_model = '../trained_models/dm.model'
 
-
-model_pars = {'weight': {'title_wt': 0.2,
-                         'prod_wt': 0.5,
-                         'image_wt': 0.0,
-                         'brand_wt':0.2,
-                         'price_wt':0.1},
-              'method': 'lsa',
+# assign weight, could pass in by command line argv later
+model_pars = {'weight': {'title_wt': 0.85,
+                         'prod_wt': 0,
+                         'image_wt': 0.15,
+                         'brand_wt':0,
+                         'price_wt':0},
+              'method': 'tfidf_word2vec',
               'title_dim': 300}
 
 
@@ -77,8 +77,8 @@ else:
 
 # build feature index
 features = ['id', 'group_id', 'category_id']
-if model_pars['weight']['prod_wt'] != 0:
-    features.extend(['products', 'parentProducts'])
+# if model_pars['weight']['prod_wt'] != 0:
+#     features.extend(['products', 'parentProducts'])
 if model_pars['weight']['brand_wt'] != 0:
     features.append('brand')
 if model_pars['weight']['price_wt'] != 0:
@@ -86,17 +86,22 @@ if model_pars['weight']['price_wt'] != 0:
 fts = {feature: id for id, feature in enumerate(features)}
 fts['title'] = (len(fts), len(fts) + model_pars['title_dim'])
 
-# need to make a copy before concatenate!!, 20 times faster
+# need to make a copy before concatenate, 20 times faster
 index_mat = df[features].values.copy()
+mat = np.concatenate((index_mat, title_mat), axis=1)
 
 # expand prelogits into its own dataframe
 if model_pars['weight']['image_wt'] != 0:
     df_prelogit = df.prelogits.apply(pd.Series)
     prelogit_mat = normalize(df_prelogit.values)
-    mat = np.concatenate((index_mat, title_mat, prelogit_mat), axis=1)
-    fts['image'] = fts['title'][1]
-else:
-    mat = np.concatenate((index_mat, title_mat), axis=1)
+    fts['image'] = (mat.shape[1], mat.shape[1] + prelogit_mat.shape[1])
+    mat = np.concatenate((mat, prelogit_mat), axis=1)
+
+# product array
+if model_pars['weight']['prod_wt'] != 0:
+    prod_mat = normalize(product2vec(df.products, model_ft))
+    fts['prod_embed'] = (mat.shape[1], mat.shape[1] + prod_mat.shape[1])
+    mat = np.concatenate((mat, prod_mat), axis=1)
 
 # make a wrapper of query function
 def query_wrapper(ind):

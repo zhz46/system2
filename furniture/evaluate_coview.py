@@ -5,17 +5,23 @@ import time
 from sklearn.preprocessing import normalize
 from gensim.models.keyedvectors import KeyedVectors
 from gensim.models.doc2vec import Doc2Vec
+from gensim.models.word2vec import Word2Vec
 
-from preprocess import data_load, pre_process, title_process, image_merge, df_filter, text_process, doc2vec_centroid, product_map, doc2vec_tfidf
+from preprocess import data_load, pre_process, title_process, image_merge, df_filter, text_process, doc2vec_centroid, product_map, doc2vec_tfidf, product2vec
 from evaluate_tools import generate_map, df_sort, score, parallel
-#
-# text_input = '../dat/data/18000*.json'
-# image_input = '../dat/raw/18000*.json'
+
+text_input = '../dat/data/18000*.json'
+image_input = '../dat/raw/18000*.json'
 text_input = '/srv/zz/temp/18000*.json'
 image_input = '/yg/analytics/rex/tensorflow/image2vec/dat/output/raw/18000*.json'
 co_view_query = '../dat/co_view_query.pkl'
+# Eliot's fasttext model
 word2vec_model = '../trained_models/titles_wp_model_dim_300_maxn_6_minCount_5_minn_3_wordNgrams_3_ws_5.vec'
-doc2vec_model = '../trained_models/dm.model'
+# word2vec model
+word2vec_model2 = '../trained_models/word2vec_win1.model'
+# Fasttext model
+word2vec_model3 = '../trained_models/ft_win2.vec'
+doc2vec_model = '../trained_models/dm_win4.model'
 
 
 # co_view = co_view_select(sqlite_file)
@@ -23,9 +29,9 @@ doc2vec_model = '../trained_models/dm.model'
 #     pickle.dump(co_view, output, pickle.HIGHEST_PROTOCOL)
 
 # text + image score
-model_pars = {'weight': {'title_wt': 0.4,
-                         'prod_wt': 0.4,
-                         'image_wt': 0.2,
+model_pars = {'weight': {'title_wt': 0.85,
+                         'prod_wt': 0,
+                         'image_wt': 0.15,
                          'brand_wt':0,
                          'price_wt':0},
               'method': 'tfidf_word2vec',
@@ -40,9 +46,12 @@ raw_data = data_load(text_input)
 # pre_process data
 df = pre_process(raw_data)
 
+# load models
 if model_pars['method'] in ['mean_word2vec', 'tfidf_word2vec']:
-    model_path = word2vec_model
+    model_path = word2vec_model3
     model_ft = KeyedVectors.load_word2vec_format(model_path)
+    # model_path = word2vec_model3
+    # model_ft = Word2Vec.load(model_path)
     # filter out empty bags of word
     df = df_filter(df, model_ft)
 if model_pars['method'] == 'dm':
@@ -67,7 +76,7 @@ if model_pars['method'] == 'lsa':
 elif model_pars['method'] == 'tfidf_word2vec':
     docs = np.array([text_process(title, model_ft) for title in titles])
     title_mat = normalize(doc2vec_tfidf(docs, model_ft))
-    # title_mat = normalize(doc_to_vec(docs=docs, model=model_ft, algo='tfidf', pca=1))
+    # title_mat = normalize(doc_to_vec(docs=docs, model=model_ft, algo='weight', pca=1))
 elif model_pars['method'] == 'mean_word2vec':
     docs = np.array([text_process(title, model_ft) for title in titles])
     title_mat = normalize(np.array([doc2vec_centroid(doc, model_ft.wv) for doc in docs]))
@@ -79,8 +88,8 @@ else:
 
 # build feature index
 features = ['sku_id', 'group_id', 'category_id']
-if model_pars['weight']['prod_wt'] != 0:
-    features.extend(['products', 'parentProducts'])
+# if model_pars['weight']['prod_wt'] != 0:
+#     features.extend(['products', 'parentProducts'])
 if model_pars['weight']['brand_wt'] != 0:
     features.append('brand')
 if model_pars['weight']['price_wt'] != 0:
@@ -88,34 +97,39 @@ if model_pars['weight']['price_wt'] != 0:
 fts = {feature: id for id, feature in enumerate(features)}
 fts['title'] = (len(fts), len(fts) + model_pars['title_dim'])
 
-# need to make a copy before concatenate!!, 20 times faster
+# need to make a copy before concatenate, 20 times faster
 index_mat = new_df[features].values.copy()
+mat = np.concatenate((index_mat, title_mat), axis=1)
 
 # expand prelogits into its own dataframe
 if model_pars['weight']['image_wt'] != 0:
     df_prelogit = new_df.prelogits.apply(pd.Series)
     prelogit_mat = normalize(df_prelogit.values)
-    mat = np.concatenate((index_mat, title_mat, prelogit_mat), axis=1)
-    fts['image'] = fts['title'][1]
-else:
-    mat = np.concatenate((index_mat, title_mat), axis=1)
+    fts['image'] = (mat.shape[1], mat.shape[1] + prelogit_mat.shape[1])
+    mat = np.concatenate((mat, prelogit_mat), axis=1)
+
+# product array
+if model_pars['weight']['prod_wt'] != 0:
+    prod_mat = normalize(product2vec(new_df.products, model_ft))
+    fts['prod_embed'] = (mat.shape[1], mat.shape[1] + prod_mat.shape[1])
+    mat = np.concatenate((mat, prod_mat), axis=1)
 
 # divide mats
 candidate_mat = mat[:(len(df) - len(sec2pri))].copy()
 second_mat = mat[(len(df) - len(sec2pri)):].copy()
 
 # calculate importance score for each sku
-for i in [0.2, 0.3]:
-    model_pars['weight']['title_wt'] = i
-    model_pars['weight']['image_wt'] = i * 0.2
-    model_pars['weight']['prod_wt'] = 1 - i * 1.2
-    start = time.time()
-    def score_combo(idx):
-        return score(idx, candidate_mat=candidate_mat, sec2pri=sec2pri, second_mat=second_mat, fts=fts,
-              category_map=category_map, co_view_map=co_view_map, wt=model_pars['weight'])
+# model_pars['weight']['title_wt'] = i
+# model_pars['weight']['image_wt'] = i * 0.2
+# model_pars['weight']['prod_wt'] = 1 - i * 1.2
 
-    combo_score = parallel(score_combo, list(co_view_map.keys()))
-    combo_score = np.array(combo_score)
-    ratio = np.sum(combo_score, axis=0)[0] / np.sum(combo_score, axis=0)[1]
-    print(ratio)
-    print(time.time()-start)
+start = time.time()
+def score_combo(idx):
+    return score(idx, candidate_mat=candidate_mat, sec2pri=sec2pri, second_mat=second_mat, fts=fts,
+          category_map=category_map, co_view_map=co_view_map, wt=model_pars['weight'])
+
+combo_score = parallel(score_combo, list(co_view_map.keys()))
+combo_score = np.array(combo_score)
+ratio = np.sum(combo_score, axis=0)[0] / np.sum(combo_score, axis=0)[1]
+print(ratio)
+print(time.time()-start)
